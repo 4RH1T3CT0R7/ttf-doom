@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTDoom -- Variable Axis Test</title>
+    <style>
+        @font-face {
+            font-family: "DoomVarPOC";
+            src: url("../../var_poc.ttf") format("truetype");
+        }
+
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            background: #1a1a2e;
+            color: #e0e0e0;
+        }
+
+        h1 {
+            color: #ff4444;
+            border-bottom: 2px solid #ff4444;
+            padding-bottom: 0.5rem;
+        }
+
+        h2 {
+            color: #cc3333;
+            margin-top: 2rem;
+        }
+
+        .test-area {
+            background: #16213e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 2rem;
+            margin: 1.5rem 0;
+        }
+
+        #glyph-display {
+            font-family: "DoomVarPOC", monospace;
+            font-size: 300px;
+            font-variation-settings: "MOVE" 500;
+            color: #00ff00;
+            line-height: 1;
+            text-align: center;
+        }
+
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        .slider-row label {
+            min-width: 120px;
+            font-family: monospace;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            max-width: 400px;
+            accent-color: #00ff00;
+        }
+
+        .slider-row .value {
+            font-family: monospace;
+            color: #00ff00;
+            min-width: 60px;
+            text-align: right;
+        }
+
+        .size-row {
+            margin-bottom: 1rem;
+        }
+
+        .size-row .label {
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .size-row .doom-font {
+            font-family: "DoomVarPOC", monospace;
+            color: #00ff00;
+            line-height: 1.2;
+            font-variation-settings: "MOVE" 500;
+        }
+
+        .size-24  { font-size: 24px; }
+        .size-48  { font-size: 48px; }
+        .size-72  { font-size: 72px; }
+        .size-120 { font-size: 120px; }
+
+        canvas {
+            border: 1px solid #444;
+            background: #000;
+            display: block;
+            margin-top: 1rem;
+        }
+
+        #status {
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .status-ok  { background: #0a3d0a; color: #4caf50; }
+        .status-err { background: #3d0a0a; color: #f44336; }
+
+        .info {
+            color: #888;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+
+        table.axis-map {
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+
+        table.axis-map th,
+        table.axis-map td {
+            border: 1px solid #444;
+            padding: 0.3rem 0.8rem;
+            text-align: right;
+        }
+
+        table.axis-map th {
+            background: #0f3460;
+            color: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <h1>TTDoom -- Variable Axis Test</h1>
+
+    <div id="status">Loading font...</div>
+
+    <div class="test-area">
+        <div id="glyph-display">A</div>
+
+        <div class="slider-row">
+            <label>MOVE axis:</label>
+            <input type="range" id="move-slider" min="0" max="1000" value="500" step="1">
+            <span class="value" id="move-value">500</span>
+        </div>
+
+        <div class="info">
+            Drag the slider to change the MOVE axis value.
+            The bar height should change in real time via font hinting (GETVARIATION + SCFS).
+        </div>
+
+        <table class="axis-map">
+            <tr><th>MOVE</th><th>Normalised (F2Dot14)</th><th>Target height</th></tr>
+            <tr><td>0</td><td>-16384 (-1.0)</td><td>~0 FUnits</td></tr>
+            <tr><td>500</td><td>0 (0.0)</td><td>~400 FUnits</td></tr>
+            <tr><td>1000</td><td>+16384 (+1.0)</td><td>~800 FUnits</td></tr>
+        </table>
+    </div>
+
+    <h2>Multiple sizes</h2>
+    <div class="test-area">
+        <div class="size-row">
+            <div class="label">24px</div>
+            <div class="doom-font size-24" id="s24">A</div>
+        </div>
+        <div class="size-row">
+            <div class="label">48px</div>
+            <div class="doom-font size-48" id="s48">A</div>
+        </div>
+        <div class="size-row">
+            <div class="label">72px</div>
+            <div class="doom-font size-72" id="s72">A</div>
+        </div>
+        <div class="size-row">
+            <div class="label">120px</div>
+            <div class="doom-font size-120" id="s120">A</div>
+        </div>
+    </div>
+
+    <h2>Canvas rendering</h2>
+    <canvas id="canvas" width="600" height="200"></canvas>
+
+    <script>
+        // Elements that use the variable font.
+        const glyphDisplay = document.getElementById("glyph-display");
+        const sizeElements = [
+            document.getElementById("s24"),
+            document.getElementById("s48"),
+            document.getElementById("s72"),
+            document.getElementById("s120"),
+        ];
+        const slider = document.getElementById("move-slider");
+        const valueLabel = document.getElementById("move-value");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        function updateAxis(value) {
+            const setting = `"MOVE" ${value}`;
+            glyphDisplay.style.fontVariationSettings = setting;
+            sizeElements.forEach(function (el) {
+                el.style.fontVariationSettings = setting;
+            });
+            valueLabel.textContent = value;
+            drawCanvas(value);
+        }
+
+        function drawCanvas(moveValue) {
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw the glyph at three axis positions for comparison.
+            const positions = [
+                { x: 40,  val: 0,    label: "MOVE=0" },
+                { x: 220, val: moveValue, label: "MOVE=" + moveValue },
+                { x: 400, val: 1000, label: "MOVE=1000" },
+            ];
+
+            positions.forEach(function (p) {
+                ctx.font = `120px "DoomVarPOC"`;
+                ctx.fontVariationSettings = `"MOVE" ${p.val}`;
+                // Canvas API font-variation-settings workaround:
+                // We set it via the font shorthand by appending the variation.
+                // Some browsers don't support fontVariationSettings on canvas,
+                // so we use the CSS font string with variation-settings.
+                ctx.font = `120px "DoomVarPOC"`;
+
+                ctx.fillStyle = "#00ff00";
+                ctx.textBaseline = "alphabetic";
+                ctx.fillText("A", p.x, 170);
+
+                ctx.fillStyle = "#888";
+                ctx.font = "12px monospace";
+                ctx.fillText(p.label, p.x, 190);
+            });
+
+            // Grid lines.
+            ctx.strokeStyle = "rgba(255,255,255,0.1)";
+            ctx.lineWidth = 0.5;
+            for (var y = 0; y < canvas.height; y += 20) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+        }
+
+        // Slider handler.
+        slider.addEventListener("input", function () {
+            updateAxis(parseInt(slider.value, 10));
+        });
+
+        // Font load check.
+        document.fonts.ready.then(function () {
+            var loaded = document.fonts.check('48px "DoomVarPOC"');
+            var status = document.getElementById("status");
+            if (loaded) {
+                status.textContent = "DoomVarPOC font loaded successfully.";
+                status.className = "status-ok";
+            } else {
+                status.textContent = "WARNING: DoomVarPOC font did NOT load. Check the file path.";
+                status.className = "status-err";
+            }
+            // Initial canvas draw.
+            drawCanvas(parseInt(slider.value, 10));
+        });
+    </script>
+</body>
+</html>
