@@ -1,0 +1,4 @@
+fonttools>=4.47.0
+freetype-py>=2.4.0
+pygame>=2.5.0
+pytest>=7.0.0
