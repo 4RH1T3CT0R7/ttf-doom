@@ -1,0 +1,20 @@
+# test_game.doom
+const MAP_SIZE = 16
+var player_x: int = 512
+var player_y: int = 512
+var player_angle: int = 0
+array map_data[256]
+
+func move_player(dx: int, dy: int):
+    player_x = player_x + dx
+    player_y = player_y + dy
+
+func game_tick():
+    var move: int = get_axis(0)
+    var turn: int = get_axis(2)
+    player_angle = player_angle + turn / 512
+    if player_angle < 0:
+        player_angle = player_angle + 256
+    if player_angle >= 256:
+        player_angle = player_angle - 256
+    move_player(move / 4, 0)
