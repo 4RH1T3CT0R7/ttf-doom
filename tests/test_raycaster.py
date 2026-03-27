@@ -279,13 +279,13 @@ class TestDoomCompilation:
         ]
         assert len(while_funcs) >= 2, "Expected at least 2 while loops"
 
-    def test_prep_initializes_variables(self, compiled_result):
-        """Prep assembly initialises global variables."""
+    def test_prep_does_not_reset_player_state(self, compiled_result):
+        """Prep must NOT reset player vars (they persist between frames)."""
         result, _ = compiled_result
         prep = result["prep"]
-        # Should contain WS[] instructions for player_x, player_y, player_angle
+        # Player vars have no init values → prep should not write them
         ws_count = sum(1 for line in prep if line == "WS[]")
-        assert ws_count >= 3, "Expected WS[] for at least 3 global vars"
+        assert ws_count == 0, f"Base prep should have no WS[] (got {ws_count})"
 
     def test_total_storage_reasonable(self, compiled_result):
         """Total storage allocation stays within practical limits."""

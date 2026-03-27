@@ -19,10 +19,11 @@ const MAX_STEPS = 16
 const MOVE_SPEED = 8
 const TURN_SPEED = 4
 
-# --- Player state (stored in global storage) ---
-var player_x: int = 160
-var player_y: int = 160
-var player_angle: int = 0
+# --- Player state (NO init values — prep must not reset these each frame) ---
+var player_x: int
+var player_y: int
+var player_angle: int
+var initialized: int
 
 # --- Map data (16x16 = 256 entries, loaded by build.py prep) ---
 array map_data[256]
@@ -120,6 +121,11 @@ func move_player(dx: int, dy: int):
 
 # --- Main game tick (called from glyph program) ---
 func game_tick():
+    if initialized == 0:
+        player_x = 160
+        player_y = 160
+        player_angle = 0
+        initialized = 1
     var move_input: int = get_axis(0)
     var strafe_input: int = get_axis(1)
     var turn_input: int = get_axis(2)
