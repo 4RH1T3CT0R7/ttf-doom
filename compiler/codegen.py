@@ -301,19 +301,27 @@ class CodeGenerator:
         elif op.op == "-":
             lines.append("SUB[]")
         elif op.op == "*":
-            # Plain integer multiply:
-            # MUL(a, b) = (a*b)/64.  MUL(result, 4096) = (result*4096)/64
-            # = result * 64 = a*b.
-            lines.append("MUL[]")
-            lines.extend(self._push_value(4096))
-            lines.append("MUL[]")
+            # Plain integer multiply: a * b
+            # Old approach MUL(a,b)*4096 fails for small values (1*4=0!)
+            # because MUL does (a*b)/64 with integer truncation.
+            #
+            # Fix: DIV(a, 1) = a*64, then MUL(a*64, b) = (a*64*b)/64 = a*b
+            # Need to insert DIV(,1) between a and b on stack.
+            # Stack after compiling left+right: [a, b]
+            # We need: [a*64, b] → MUL → a*b
+            # So: compile a, PUSHB 1, DIV (→a*64), compile b, MUL
+            lines = []
+            lines.extend(self._compile_expr(op.left))
+            lines.append("PUSHB[] 1")
+            lines.append("DIV[]")     # a*64
+            lines.extend(self._compile_expr(op.right))
+            lines.append("MUL[]")     # (a*64 * b) / 64 = a*b
         elif op.op == "/":
-            # Plain integer divide:
-            # DIV(a, b) = (a*64)/b.  DIV(result, 4096) = (result*64)/4096
-            # = result/64 = a/b.
+            # Plain integer divide: a / b
+            # DIV(a, b) = (a*64)/b. MUL(result, 1) = result/64 = a/b
             lines.append("DIV[]")
-            lines.extend(self._push_value(4096))
-            lines.append("DIV[]")
+            lines.append("PUSHB[] 1")
+            lines.append("MUL[]")
         elif op.op == "%":
             # Modulo: a % b = a - (a / b) * b
             # We need a and b again, but they're already consumed.
@@ -323,11 +331,12 @@ class CodeGenerator:
             lines.extend(self._compile_expr(op.left))   # a, a
             lines.extend(self._compile_expr(op.right))   # a, a, b
             lines.append("DIV[]")                         # a, (a*64)/b
-            lines.extend(self._push_value(4096))
-            lines.append("DIV[]")                         # a, a/b (integer)
+            lines.append("PUSHB[] 1")
+            lines.append("MUL[]")                         # a, a/b (integer)
             lines.extend(self._compile_expr(op.right))   # a, a/b, b
-            lines.append("MUL[]")                         # a, ((a/b)*b)/64
-            lines.extend(self._push_value(4096))
+            lines.append("PUSHB[] 1")
+            lines.append("DIV[]")                         # a, a/b, b*64
+            lines.append("SWAP[]")
             lines.append("MUL[]")                         # a, (a/b)*b
             lines.append("SUB[]")                         # a - (a/b)*b
         elif op.op == "==":
@@ -445,22 +454,63 @@ class CodeGenerator:
         return lines
 
     def _compile_set_point_y(self, call: FuncCall) -> list[str]:
-        """Compile set_point_y(point_idx, coordinate) intrinsic.
+        """Compile set_point_y(point_idx, coordinate_funits) intrinsic.
 
-        Emits: SVTCA[0] (Y-axis), then push point index, push coordinate,
-        then SCFS[].
+        Accepts coordinate in font units (0..1000 for a 1000-UPM font) and
+        converts to F26Dot6 pixel coordinates at runtime via MPPEM:
 
-        SCFS pops coordinate (top), then point index (below).
-        So stack before SCFS must be: [point_idx, coord].
+            f26d6 = funits * ppem * 64 / 1000
+
+        Using TT arithmetic (MUL does (a*b)/64):
+            MUL(funits, ppem)  = funits * ppem / 64
+            Result is already in F26Dot6! (For a 1000-UPM font, the
+            built-in MUL scaling matches exactly: funits/1000 * ppem * 64)
+
+        Wait — that gives funits*ppem/64. For funits=500, ppem=200:
+            500*200/64 = 1562.5 → 1562 F26Dot6 = 24.4 px. Expected: 100 px.
+        That's wrong. We need funits * ppem / 1000 * 64.
+
+        Correct approach: funits * ppem * 64 / 1000
+            = MUL(funits, ppem) * 64 / ... too complex.
+
+        Simpler: use the formula from variable_poc.py:
+            MPPEM, MUL with scaled constant, DIV to normalize.
+            target_f26d6 = funits * ppem * 64 / upm
+            For upm=1000: target = funits * ppem * 64 / 1000
+
+        Step by step:
+            1. MUL(funits, ppem) = funits * ppem / 64
+            2. That's funits*ppem/64. We need funits*ppem*64/1000.
+            3. So multiply result by 64*64/1000 = 4096/1000 ≈ 4.096
+            4. MUL(result, 4096) = result * 4096 / 64 = result * 64
+            5. Then DIV(result2, 1000): wait, DIV does (n2*64)/n1
+               DIV(result2, 1000) = result2*64/1000
+            6. Total: (funits*ppem/64) * 64 * 64 / 1000 = funits*ppem*64/1000 ✓
+
+        Implementation:
+            {funits}         # coordinate in font units
+            MPPEM[]          # push ppem
+            MUL[]            # funits * ppem / 64
+            PUSHW[] 4096
+            MUL[]            # (funits*ppem/64) * 4096 / 64 = funits*ppem
+            PUSHW[] 1000
+            DIV[]            # (funits*ppem) * 64 / 1000 = funits*ppem*64/1000 ✓
         """
         if len(call.args) != 2:
             raise CodeGenError("set_point_y() requires exactly 2 arguments")
 
         lines: list[str] = []
         lines.append("SVTCA[0]")
-        # Push point index first, then coordinate
+        # Push point index first
         lines.extend(self._compile_expr(call.args[0]))  # point_idx
-        lines.extend(self._compile_expr(call.args[1]))  # coordinate
+        # Compute F26Dot6 coordinate from font units
+        lines.extend(self._compile_expr(call.args[1]))  # funits
+        lines.append("MPPEM[]")
+        lines.append("MUL[]")          # funits * ppem / 64
+        lines.append("PUSHW[] 4096")
+        lines.append("MUL[]")          # * 4096 / 64 = funits * ppem
+        lines.append("PUSHW[] 1000")
+        lines.append("DIV[]")          # * 64 / 1000 = funits*ppem*64/1000 (F26Dot6)
         lines.append("SCFS[]")
         return lines
 

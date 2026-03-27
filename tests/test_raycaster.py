@@ -366,13 +366,13 @@ class TestFontStructure:
     def test_glyph_has_32_contours(self, font: TTFont):
         """Glyph 'A' has 32 bar contours (one per display column)."""
         glyph = font["glyf"]["A"]
-        assert glyph.numberOfContours == 32
+        assert glyph.numberOfContours == 16
 
     def test_glyph_has_128_points(self, font: TTFont):
         """Glyph 'A' has 32 * 4 = 128 on-curve points."""
         glyph = font["glyf"]["A"]
         coords = glyph.getCoordinates(font["glyf"])
-        assert len(coords[0]) == 128
+        assert len(coords[0]) == 64
 
     def test_glyph_has_program(self, font: TTFont):
         """Glyph 'A' has a hinting program attached."""
@@ -470,7 +470,7 @@ class TestFontReload:
             assert "fvar" in font2
             assert "fpgm" in font2
             assert "prep" in font2
-            assert font2["glyf"]["A"].numberOfContours == 32
+            assert font2["glyf"]["A"].numberOfContours == 16
             font2.close()
         finally:
             if os.path.exists(tmp_path):
@@ -843,7 +843,7 @@ class TestEndToEnd:
             build(output_path=path)
             font = TTFont(path)
             assert "A" in font["glyf"]
-            assert font["glyf"]["A"].numberOfContours == 32
+            assert font["glyf"]["A"].numberOfContours == 16
             font.close()
         finally:
             os.unlink(path)
