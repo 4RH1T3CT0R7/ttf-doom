@@ -1,0 +1,136 @@
+# doom.doom -- TTDoom Raycasting Engine
+# A DDA raycaster running inside the TrueType hinting VM.
+#
+# Constraints:
+#   - 32 display columns (bars) to stay under TT call-stack limits
+#   - 16 max ray steps per column (recursive FDEF pattern)
+#   - Sin/cos tables: 256 entries, scale=256, loaded by prep
+#   - Player coordinates: plain integers, cell_size=64
+#   - Map: 16x16 grid, 0=empty, 1=wall
+
+# --- Constants ---
+const MAP_W = 16
+const MAP_H = 16
+const CELL_SIZE = 64
+const NUM_COLS = 32
+const FOV_HALF = 16
+const WALL_SCALE = 8192
+const MAX_STEPS = 16
+const MOVE_SPEED = 8
+const TURN_SPEED = 4
+
+# --- Player state (stored in global storage) ---
+var player_x: int = 160
+var player_y: int = 160
+var player_angle: int = 0
+
+# --- Map data (16x16 = 256 entries, loaded by build.py prep) ---
+array map_data[256]
+
+# --- Sin/cos tables (256 entries each, loaded by build.py prep) ---
+array sin_table[256]
+array cos_table[256]
+
+# --- Helper: get sin value with wrapping ---
+func get_sin(angle: int) -> int:
+    var idx: int = angle
+    if idx < 0:
+        idx = idx + 256
+    if idx >= 256:
+        idx = idx - 256
+    return sin_table[idx]
+
+# --- Helper: get cos value with wrapping ---
+func get_cos(angle: int) -> int:
+    var idx: int = angle
+    if idx < 0:
+        idx = idx + 256
+    if idx >= 256:
+        idx = idx - 256
+    return cos_table[idx]
+
+# --- Map access with bounds checking ---
+func get_map(gx: int, gy: int) -> int:
+    if gx < 0:
+        return 1
+    if gx >= MAP_W:
+        return 1
+    if gy < 0:
+        return 1
+    if gy >= MAP_H:
+        return 1
+    return map_data[gy * MAP_W + gx]
+
+# --- DDA Raycaster: cast one ray, return distance ---
+func raycast(col: int) -> int:
+    var ray_angle: int = player_angle + col - FOV_HALF
+    if ray_angle < 0:
+        ray_angle = ray_angle + 256
+    if ray_angle >= 256:
+        ray_angle = ray_angle - 256
+    var dx: int = get_cos(ray_angle)
+    var dy: int = get_sin(ray_angle)
+    var px: int = player_x
+    var py: int = player_y
+    var step: int = 0
+    while step < MAX_STEPS:
+        px = px + dx / 4
+        py = py + dy / 4
+        var gx: int = px / CELL_SIZE
+        var gy: int = py / CELL_SIZE
+        if get_map(gx, gy) > 0:
+            return step + 1
+        step = step + 1
+    return MAX_STEPS
+
+# --- Render one column: cast ray and set bar heights ---
+func render_col(col: int):
+    var dist: int = raycast(col)
+    var height: int = 0
+    if dist > 0:
+        height = WALL_SCALE / dist
+    if height > 900:
+        height = 900
+    var top_y: int = 500 + height / 2
+    var bot_y: int = 500 - height / 2
+    set_point_y(col * 4 + 2, top_y)
+    set_point_y(col * 4 + 3, top_y)
+    set_point_y(col * 4, bot_y)
+    set_point_y(col * 4 + 1, bot_y)
+
+# --- Render frame: cast all 32 rays using a while loop ---
+func render_frame():
+    var col: int = 0
+    while col < NUM_COLS:
+        render_col(col)
+        col = col + 1
+
+# --- Player movement with collision detection ---
+func move_player(dx: int, dy: int):
+    var new_x: int = player_x + dx
+    var new_y: int = player_y + dy
+    var gx: int = new_x / CELL_SIZE
+    var gy: int = player_y / CELL_SIZE
+    if get_map(gx, gy) == 0:
+        player_x = new_x
+    var gx2: int = player_x / CELL_SIZE
+    var gy2: int = new_y / CELL_SIZE
+    if get_map(gx2, gy2) == 0:
+        player_y = new_y
+
+# --- Main game tick (called from glyph program) ---
+func game_tick():
+    var move_input: int = get_axis(0)
+    var strafe_input: int = get_axis(1)
+    var turn_input: int = get_axis(2)
+    var turn_amount: int = turn_input / 4096
+    player_angle = player_angle + turn_amount
+    if player_angle < 0:
+        player_angle = player_angle + 256
+    if player_angle >= 256:
+        player_angle = player_angle - 256
+    var forward: int = move_input / 2048
+    var fwd_dx: int = get_cos(player_angle) * forward / 256
+    var fwd_dy: int = get_sin(player_angle) * forward / 256
+    move_player(fwd_dx, fwd_dy)
+    render_frame()

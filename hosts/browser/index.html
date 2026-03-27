@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TTDoom - DOOM in a TrueType Font</title>
+<style>
+    @font-face {
+        font-family: 'DoomFont';
+        src: url('../../doom.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+        background: #111;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        flex-direction: column;
+        overflow: hidden;
+        font-family: monospace;
+    }
+
+    #game {
+        font-family: 'DoomFont', monospace;
+        font-size: min(80vh, 90vw);
+        color: #33ff33;
+        line-height: 1;
+        letter-spacing: 0;
+        font-variation-settings:
+            'MOVX' 0,
+            'MOVY' 0,
+            'TURN' 0,
+            'FIRE' 0,
+            'ACTN' 0;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    #hud {
+        color: #0a0;
+        font-size: 13px;
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        line-height: 1.5;
+    }
+
+    #hud kbd {
+        background: #222;
+        border: 1px solid #444;
+        border-radius: 3px;
+        padding: 1px 5px;
+        color: #0f0;
+    }
+
+    #status {
+        color: #555;
+        font-size: 11px;
+        position: fixed;
+        top: 8px;
+        right: 12px;
+    }
+
+    #title {
+        color: #c00;
+        font-size: 22px;
+        font-weight: bold;
+        margin-bottom: 8px;
+        letter-spacing: 4px;
+    }
+</style>
+</head>
+<body>
+    <div id="title">TTDOOM</div>
+    <div id="game">A</div>
+    <div id="hud">
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
+        <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn &nbsp;
+        <kbd>Space</kbd> fire &nbsp;
+        <kbd>E</kbd> action
+    </div>
+    <div id="status">Loading font...</div>
+    <script src="doom.js"></script>
+</body>
+</html>

@@ -632,11 +632,20 @@ class CodeGenerator:
         """Compile a local variable declaration inside a function body.
 
         Allocates a new storage slot and optionally initialises it.
+        Local variables inside functions get their own storage slots
+        without registering in the global ``vars`` dict, so that
+        different functions can use the same local variable names.
         """
         # If we are inside a function and this var is already in func locals,
         # it was a parameter -- skip allocation.
         if self._current_func_locals and decl.name in self._current_func_locals:
             storage_idx = self._current_func_locals[decl.name]
+        elif self._current_func_locals is not None:
+            # Inside a function: allocate a private storage slot without
+            # polluting the global vars namespace.
+            storage_idx = self.allocator._next_storage
+            self.allocator._next_storage += 1
+            self._current_func_locals[decl.name] = storage_idx
         else:
             storage_idx = self.allocator.alloc_var(decl.name)
             # Also add to current function locals so it can be referenced
