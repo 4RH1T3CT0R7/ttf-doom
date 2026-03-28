@@ -25,8 +25,8 @@
     var health = 100;
 
     // Movement constants
-    var MOVE_SPEED = 6;
-    var TURN_SPEED = 5;
+    var MOVE_SPEED = 3;
+    var TURN_SPEED = 1;
     var CELL_SIZE = 64;
 
     // 16x16 map (must match the map loaded into the font's prep)
@@ -127,6 +127,13 @@
             ", 'TURN' " + axisA +
             ", 'FIRE' 0" +
             ", 'ACTN' 0";
+
+        // Force Chrome to re-rasterize the glyph by toggling font-size.
+        // Without this, Chrome caches the hinted glyph and ignores axis changes.
+        var baseSz = "min(80vh, 90vw)";
+        el.style.fontSize = "calc(" + baseSz + " - 0.01px)";
+        void el.offsetHeight;
+        el.style.fontSize = baseSz;
 
         // --- FPS ---
         frameCount++;
