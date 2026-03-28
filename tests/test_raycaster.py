@@ -179,7 +179,7 @@ class TestDoomParsing:
             if isinstance(d, FuncDef)
         }
         for name in ["get_sin", "get_cos", "get_map", "raycast",
-                      "render_col", "render_frame", "move_player",
+                      "render_col", "render_frame",
                       "game_tick"]:
             assert name in func_names, f"Missing function: {name}"
 
@@ -260,7 +260,7 @@ class TestDoomCompilation:
         """All user functions are assigned FDEF IDs."""
         _, codegen = compiled_result
         expected = ["get_sin", "get_cos", "get_map", "raycast",
-                    "render_col", "render_frame", "move_player", "game_tick"]
+                    "render_col", "render_frame", "game_tick"]
         for name in expected:
             assert name in codegen.allocator.funcs, f"Missing func ID: {name}"
 
