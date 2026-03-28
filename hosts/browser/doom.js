@@ -19,8 +19,8 @@
     var statusEl = document.getElementById("status");
 
     // --- Game state (managed entirely in JS) ---
-    var px = 160;       // world x (0..1024, cell_size=64, 16x16 grid)
-    var py = 160;       // world y
+    var px = 480;       // world x (0..1024, cell_size=64, 16x16 grid)
+    var py = 480;       // world y (center of map = cell 7,7)
     var angle = 0;      // 0..255 (256 = full circle)
     var health = 100;
 

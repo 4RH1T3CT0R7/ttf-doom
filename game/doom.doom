@@ -9,8 +9,8 @@ const MAP_H = 16
 const CELL_SIZE = 64
 const NUM_COLS = 16
 const FOV_HALF = 8
-const WALL_SCALE = 4096
-const MAX_STEPS = 8
+const WALL_SCALE = 8192
+const MAX_STEPS = 12
 
 # --- Player state (set from axes each frame, no persistence needed) ---
 var player_x: int
@@ -69,8 +69,8 @@ func raycast(col: int) -> int:
     var hit: int = 0
     while s < MAX_STEPS:
         if hit == 0:
-            px = px + dx
-            py = py + dy
+            px = px + dx / 4
+            py = py + dy / 4
             var gx: int = px / CELL_SIZE
             var gy: int = py / CELL_SIZE
             if get_map(gx, gy) > 0:
