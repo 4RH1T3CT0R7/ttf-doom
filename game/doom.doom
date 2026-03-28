@@ -1,13 +1,7 @@
-# doom.doom -- TTDoom Raycasting Engine
-# A DDA raycaster running inside the TrueType hinting VM.
-#
-# Constraints:
-#   - 32 display columns (bars) to stay under TT call-stack limits
-#   - 16 max ray steps per column (recursive FDEF pattern)
-#   - Sin/cos tables: 256 entries, scale=256, loaded by prep
-#   - Player coordinates: plain integers, cell_size=64
-#   - Map: 16x16 grid, 0=empty, 1=wall
-#   - 4 enemies max for performance (while loop = recursive FDEF)
+# doom.doom -- TTDoom Raycasting Renderer
+# The font is a pure renderer: JS passes position+angle via axes,
+# the hinting VM raycasts and positions glyph bars.
+# NO persistent state -- all game logic lives in JavaScript.
 
 # --- Constants ---
 const MAP_W = 16
@@ -17,56 +11,37 @@ const NUM_COLS = 16
 const FOV_HALF = 8
 const WALL_SCALE = 4096
 const MAX_STEPS = 8
-const MOVE_SPEED = 8
-const TURN_SPEED = 4
 
-# --- Enemy constants ---
-const MAX_ENEMIES = 4
-const ENM_X = 0
-const ENM_Y = 1
-const ENM_HP = 2
-const ENM_STATE = 3
-const ENM_TYPE = 4
-const ENM_FIELDS = 5
-
-# --- Player state (NO init values -- prep must not reset these each frame) ---
+# --- Player state (set from axes each frame, no persistence needed) ---
 var player_x: int
 var player_y: int
 var player_angle: int
-var player_health: int
-var initialized: int
 
-# --- Map data (16x16 = 256 entries, loaded by build.py prep) ---
+# --- Map data (loaded by prep via build.py) ---
 array map_data[256]
 
-# --- Sin/cos tables (256 entries each, loaded by build.py prep) ---
+# --- Sin/cos tables (loaded by prep via build.py) ---
 array sin_table[256]
 array cos_table[256]
 
-# --- Enemy data: 4 enemies x 5 fields = 20 storage slots ---
-# Fields per enemy: x, y, hp, state, type
-# state: 0=dead, 1=idle, 2=chase
-array enemy_data[20]
+# --- Trig helpers with angle wrapping ---
+func get_sin(a: int) -> int:
+    var i: int = a
+    if i < 0:
+        i = i + 256
+    if i >= 256:
+        i = i - 256
+    return sin_table[i]
 
-# --- Helper: get sin value with wrapping ---
-func get_sin(angle: int) -> int:
-    var idx: int = angle
-    if idx < 0:
-        idx = idx + 256
-    if idx >= 256:
-        idx = idx - 256
-    return sin_table[idx]
+func get_cos(a: int) -> int:
+    var i: int = a
+    if i < 0:
+        i = i + 256
+    if i >= 256:
+        i = i - 256
+    return cos_table[i]
 
-# --- Helper: get cos value with wrapping ---
-func get_cos(angle: int) -> int:
-    var idx: int = angle
-    if idx < 0:
-        idx = idx + 256
-    if idx >= 256:
-        idx = idx - 256
-    return cos_table[idx]
-
-# --- Map access with bounds checking ---
+# --- Map access with bounds check ---
 func get_map(gx: int, gy: int) -> int:
     if gx < 0:
         return 1
@@ -78,180 +53,61 @@ func get_map(gx: int, gy: int) -> int:
         return 1
     return map_data[gy * MAP_W + gx]
 
-# --- Enemy accessors ---
-func get_enemy(id: int, field: int) -> int:
-    return enemy_data[id * ENM_FIELDS + field]
-
-func set_enemy(id: int, field: int, val: int):
-    enemy_data[id * ENM_FIELDS + field] = val
-
-# --- Enemy AI: chase the player ---
-# Enemies in state 2 (chase) move toward the player each tick.
-# Movement speed is 2 units per tick.
-func ai_think():
-    var i: int = 0
-    while i < MAX_ENEMIES:
-        var state: int = get_enemy(i, ENM_STATE)
-        if state == 2:
-            var ex: int = get_enemy(i, ENM_X)
-            var ey: int = get_enemy(i, ENM_Y)
-            var dx: int = player_x - ex
-            var dy: int = player_y - ey
-            if dx > 0:
-                ex = ex + 2
-            if dx < 0:
-                ex = ex - 2
-            if dy > 0:
-                ey = ey + 2
-            if dy < 0:
-                ey = ey - 2
-            set_enemy(i, ENM_X, ex)
-            set_enemy(i, ENM_Y, ey)
-        i = i + 1
-
-# --- Hitscan shooting ---
-# Fires along the center column ray. Any alive enemy within
-# distance tolerance of the center ray hit distance takes damage.
-func fire_weapon():
-    var center_dist: int = raycast(NUM_COLS / 2)
-    var i: int = 0
-    while i < MAX_ENEMIES:
-        var state: int = get_enemy(i, ENM_STATE)
-        if state > 0:
-            var ex: int = get_enemy(i, ENM_X)
-            var ey: int = get_enemy(i, ENM_Y)
-            var edx: int = player_x - ex
-            var edy: int = player_y - ey
-            if edx < 0:
-                edx = 0 - edx
-            if edy < 0:
-                edy = 0 - edy
-            var enemy_dist: int = (edx + edy) / CELL_SIZE
-            var diff: int = enemy_dist - center_dist
-            if diff < 0:
-                diff = 0 - diff
-            if diff < 3:
-                var hp: int = get_enemy(i, ENM_HP)
-                hp = hp - 34
-                if hp <= 0:
-                    set_enemy(i, ENM_STATE, 0)
-                    hp = 0
-                set_enemy(i, ENM_HP, hp)
-        i = i + 1
-
-# --- Ray marcher: cast one ray, return distance (step count) ---
-# NOTE: return inside while doesn't exit (while = recursive FDEF).
-# Use hit flag instead of early return.
+# --- Ray marcher ---
 func raycast(col: int) -> int:
-    var ray_angle: int = player_angle + col - FOV_HALF
-    if ray_angle < 0:
-        ray_angle = ray_angle + 256
-    if ray_angle >= 256:
-        ray_angle = ray_angle - 256
-    var dx: int = get_cos(ray_angle)
-    var dy: int = get_sin(ray_angle)
+    var ra: int = player_angle + col - FOV_HALF
+    if ra < 0:
+        ra = ra + 256
+    if ra >= 256:
+        ra = ra - 256
+    var dx: int = get_cos(ra)
+    var dy: int = get_sin(ra)
     var px: int = player_x
     var py: int = player_y
-    var step: int = 0
-    var result: int = MAX_STEPS
+    var s: int = 0
+    var res: int = MAX_STEPS
     var hit: int = 0
-    while step < MAX_STEPS:
+    while s < MAX_STEPS:
         if hit == 0:
-            px = px + dx / 4
-            py = py + dy / 4
+            px = px + dx
+            py = py + dy
             var gx: int = px / CELL_SIZE
             var gy: int = py / CELL_SIZE
             if get_map(gx, gy) > 0:
-                result = step + 1
+                res = s + 1
                 hit = 1
-        step = step + 1
-    return result
+        s = s + 1
+    return res
 
-# --- Render one column: cast ray and set bar heights ---
-func render_col(col: int):
-    var dist: int = raycast(col)
-    var height: int = 0
-    if dist > 0:
-        height = WALL_SCALE / dist
-    if height > 900:
-        height = 900
-    var top_y: int = 500 + height / 2
-    var bot_y: int = 500 - height / 2
-    set_point_y(col * 4 + 2, top_y)
-    set_point_y(col * 4 + 3, top_y)
-    set_point_y(col * 4, bot_y)
-    set_point_y(col * 4 + 1, bot_y)
+# --- Render one column ---
+func render_col(c: int):
+    var d: int = raycast(c)
+    var h: int = 0
+    if d > 0:
+        h = WALL_SCALE / d
+    if h > 900:
+        h = 900
+    set_point_y(c * 4 + 2, 500 + h / 2)
+    set_point_y(c * 4 + 3, 500 + h / 2)
+    set_point_y(c * 4, 500 - h / 2)
+    set_point_y(c * 4 + 1, 500 - h / 2)
 
-# --- Render frame: cast all 32 rays using a while loop ---
+# --- Render all columns ---
 func render_frame():
-    var col: int = 0
-    while col < NUM_COLS:
-        render_col(col)
-        col = col + 1
+    var c: int = 0
+    while c < NUM_COLS:
+        render_col(c)
+        c = c + 1
 
-# --- Player movement with collision detection ---
-func move_player(dx: int, dy: int):
-    var new_x: int = player_x + dx
-    var new_y: int = player_y + dy
-    var gx: int = new_x / CELL_SIZE
-    var gy: int = player_y / CELL_SIZE
-    if get_map(gx, gy) == 0:
-        player_x = new_x
-    var gx2: int = player_x / CELL_SIZE
-    var gy2: int = new_y / CELL_SIZE
-    if get_map(gx2, gy2) == 0:
-        player_y = new_y
-
-# --- Main game tick (called from glyph program) ---
+# --- Main entry: decode axes → position, then render ---
 func game_tick():
-    if initialized == 0:
-        player_x = 160
-        player_y = 160
-        player_angle = 0
-        player_health = 100
-        # Spawn enemy 0: open area at cell (7,1) -> coords (480, 96)
-        set_enemy(0, ENM_X, 480)
-        set_enemy(0, ENM_Y, 96)
-        set_enemy(0, ENM_HP, 100)
-        set_enemy(0, ENM_STATE, 2)
-        set_enemy(0, ENM_TYPE, 1)
-        # Spawn enemy 1: open area at cell (13,2) -> coords (864, 160)
-        set_enemy(1, ENM_X, 864)
-        set_enemy(1, ENM_Y, 160)
-        set_enemy(1, ENM_HP, 100)
-        set_enemy(1, ENM_STATE, 2)
-        set_enemy(1, ENM_TYPE, 1)
-        # Spawn enemy 2: open area at cell (7,13) -> coords (480, 864)
-        set_enemy(2, ENM_X, 480)
-        set_enemy(2, ENM_Y, 864)
-        set_enemy(2, ENM_HP, 100)
-        set_enemy(2, ENM_STATE, 1)
-        set_enemy(2, ENM_TYPE, 1)
-        # Spawn enemy 3: open area at cell (13,13) -> coords (864, 864)
-        set_enemy(3, ENM_X, 864)
-        set_enemy(3, ENM_Y, 864)
-        set_enemy(3, ENM_HP, 100)
-        set_enemy(3, ENM_STATE, 1)
-        set_enemy(3, ENM_TYPE, 1)
-        initialized = 1
-    var move_input: int = get_axis(0)
-    var strafe_input: int = get_axis(1)
-    var turn_input: int = get_axis(2)
-    var fire_input: int = get_axis(3)
-    var turn_amount: int = turn_input / 4096
-    player_angle = player_angle + turn_amount
-    if player_angle < 0:
-        player_angle = player_angle + 256
-    if player_angle >= 256:
-        player_angle = player_angle - 256
-    var forward: int = move_input / 2048
-    var strafe: int = strafe_input / 2048
-    var fwd_dx: int = get_cos(player_angle) * forward / 256
-    var fwd_dy: int = get_sin(player_angle) * forward / 256
-    var str_dx: int = get_sin(player_angle) * strafe / 256
-    var str_dy: int = get_cos(player_angle) * strafe / 256
-    move_player(fwd_dx + str_dx, fwd_dy - str_dy)
-    ai_think()
-    if fire_input > 8000:
-        fire_weapon()
+    var raw_x: int = get_axis(0)
+    var raw_y: int = get_axis(1)
+    var raw_a: int = get_axis(2)
+    # Axes return F2Dot14: -16384..+16384
+    # Map to world coords: (raw + 16384) / 32 → 0..1024
+    player_x = (raw_x + 16384) / 32
+    player_y = (raw_y + 16384) / 32
+    # Map to angle: (raw + 16384) / 128 → 0..256
+    player_angle = (raw_a + 16384) / 128
     render_frame()

@@ -1,85 +1,134 @@
 /**
- * TTDoom browser host -- game loop and input handling.
+ * TTDoom browser host -- game state + input + rendering via font hinting.
  *
- * Maps keyboard input to font variation axis values and updates the
- * font-variation-settings CSS property each frame, causing the TrueType
- * hinting VM to execute one game tick and reposition glyph points.
+ * Architecture: JS = CPU (game logic, state, collision), Font = GPU (raycasting).
+ * JS passes player position and angle to the font via variation axes.
+ * The font's hinting VM raycasts and repositions glyph bars.
  *
- * Axis mapping (F2Dot14 via fvar normalisation):
- *   MOVX  -1000..+1000  forward/backward movement
- *   MOVY  -1000..+1000  strafe left/right
- *   TURN  -1000..+1000  rotate left/right
- *   FIRE     0..+1000   fire button
- *   ACTN     0..+1000   action button
+ * Axis encoding (fvar range 0..1000, GETVARIATION normalizes to F2Dot14):
+ *   MOVX: player_x mapped to 0..1000 (world range 0..1024)
+ *   MOVY: player_y mapped to 0..1000
+ *   TURN: player_angle mapped to 0..1000 (angle range 0..256)
+ *   FIRE: unused for now
+ *   ACTN: unused for now
  */
-
 (function () {
     "use strict";
 
     var el = document.getElementById("game");
     var statusEl = document.getElementById("status");
 
-    // Current key state.
+    // --- Game state (managed entirely in JS) ---
+    var px = 160;       // world x (0..1024, cell_size=64, 16x16 grid)
+    var py = 160;       // world y
+    var angle = 0;      // 0..255 (256 = full circle)
+    var health = 100;
+
+    // Movement constants
+    var MOVE_SPEED = 6;
+    var TURN_SPEED = 5;
+    var CELL_SIZE = 64;
+
+    // 16x16 map (must match the map loaded into the font's prep)
+    var MAP = [
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,1,1,0,0,0,0,0,0,1,0,0,0,1,
+        1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+        1,0,0,1,1,0,0,0,0,0,0,1,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+    ];
+
+    function isWall(wx, wy) {
+        var gx = Math.floor(wx / CELL_SIZE);
+        var gy = Math.floor(wy / CELL_SIZE);
+        if (gx < 0 || gx >= 16 || gy < 0 || gy >= 16) return true;
+        return MAP[gy * 16 + gx] === 1;
+    }
+
+    // Key state
     var pressed = {};
-
-    // Axis values, updated each frame.
-    var axes = {
-        MOVX: 0,
-        MOVY: 0,
-        TURN: 0,
-        FIRE: 0,
-        ACTN: 0
-    };
-
-    // Frame counter for the status display.
-    var frameCount = 0;
-    var lastFpsTime = performance.now();
-    var fps = 0;
-
-    // --- Input listeners ---
-
     document.addEventListener("keydown", function (e) {
         pressed[e.code] = true;
-        // Prevent scrolling with arrow keys and space.
-        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].indexOf(e.code) !== -1) {
+        if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) !== -1)
             e.preventDefault();
-        }
     });
+    document.addEventListener("keyup", function (e) { pressed[e.code] = false; });
 
-    document.addEventListener("keyup", function (e) {
-        pressed[e.code] = false;
-    });
-
-    // --- Game loop ---
+    // FPS counter
+    var frameCount = 0, lastFpsTime = performance.now(), fps = 0;
 
     function gameLoop() {
-        // Map movement keys to axis values.
-        // Positive = forward/right, negative = backward/left.
-        // The axis range is -1000..+1000 with 0 as neutral.
-        axes.MOVX = 0;
-        if (pressed["KeyW"] || pressed["ArrowUp"]) axes.MOVX = 1000;
-        if (pressed["KeyS"] || pressed["ArrowDown"]) axes.MOVX = -1000;
+        // --- Turn ---
+        if (pressed["ArrowRight"]) angle = (angle + TURN_SPEED) % 256;
+        if (pressed["ArrowLeft"])  angle = (angle - TURN_SPEED + 256) % 256;
 
-        axes.MOVY = 0;
-        if (pressed["KeyD"]) axes.MOVY = 1000;
-        if (pressed["KeyA"]) axes.MOVY = -1000;
+        // --- Movement ---
+        var rad = angle / 256 * Math.PI * 2;
+        var cosA = Math.cos(rad);
+        var sinA = Math.sin(rad);
+        var dx = 0, dy = 0;
 
-        axes.TURN = 0;
-        if (pressed["ArrowRight"]) axes.TURN = 1000;
-        if (pressed["ArrowLeft"]) axes.TURN = -1000;
+        if (pressed["KeyW"] || pressed["ArrowUp"]) {
+            dx += cosA * MOVE_SPEED;
+            dy += sinA * MOVE_SPEED;
+        }
+        if (pressed["KeyS"] || pressed["ArrowDown"]) {
+            dx -= cosA * MOVE_SPEED;
+            dy -= sinA * MOVE_SPEED;
+        }
+        if (pressed["KeyD"]) {
+            dx += sinA * MOVE_SPEED;
+            dy -= cosA * MOVE_SPEED;
+        }
+        if (pressed["KeyA"]) {
+            dx -= sinA * MOVE_SPEED;
+            dy += cosA * MOVE_SPEED;
+        }
 
-        axes.FIRE = pressed["Space"] ? 1000 : 0;
-        axes.ACTN = pressed["KeyE"] ? 1000 : 0;
+        // --- Collision (axis-independent sliding) ---
+        var newX = px + dx;
+        var newY = py + dy;
+        var margin = 8; // keep player away from walls
 
-        // Apply axis values as font variation settings.
+        if (!isWall(newX + margin, py) && !isWall(newX - margin, py)) {
+            px = newX;
+        }
+        if (!isWall(px, newY + margin) && !isWall(px, newY - margin)) {
+            py = newY;
+        }
+
+        // Clamp to world bounds
+        px = Math.max(8, Math.min(1016, px));
+        py = Math.max(8, Math.min(1016, py));
+
+        // --- Map game state to font axes (0..1000) ---
+        var axisX = Math.round(px / 1024 * 1000);
+        var axisY = Math.round(py / 1024 * 1000);
+        var axisA = Math.round(angle / 256 * 1000);
+
+        axisX = Math.max(0, Math.min(1000, axisX));
+        axisY = Math.max(0, Math.min(1000, axisY));
+        axisA = Math.max(0, Math.min(1000, axisA));
+
         el.style.fontVariationSettings =
-            "'MOVX' " + axes.MOVX +
-            ", 'MOVY' " + axes.MOVY +
-            ", 'TURN' " + axes.TURN +
-            ", 'FIRE' " + axes.FIRE +
-            ", 'ACTN' " + axes.ACTN;
+            "'MOVX' " + axisX +
+            ", 'MOVY' " + axisY +
+            ", 'TURN' " + axisA +
+            ", 'FIRE' 0" +
+            ", 'ACTN' 0";
 
-        // FPS tracking.
+        // --- FPS ---
         frameCount++;
         var now = performance.now();
         if (now - lastFpsTime >= 1000) {
@@ -87,29 +136,22 @@
             frameCount = 0;
             lastFpsTime = now;
             if (statusEl) {
-                statusEl.textContent = fps + " fps | axes: " +
-                    "MOVX=" + axes.MOVX +
-                    " MOVY=" + axes.MOVY +
-                    " TURN=" + axes.TURN;
+                statusEl.textContent = fps + " fps | pos=(" +
+                    Math.round(px) + "," + Math.round(py) +
+                    ") angle=" + angle;
             }
         }
 
         requestAnimationFrame(gameLoop);
     }
 
-    // --- Font load detection ---
-
-    // Wait for the custom font to load before starting the game loop.
+    // Start after font loads
     if (document.fonts) {
         document.fonts.ready.then(function () {
             if (statusEl) statusEl.textContent = "Ready";
             gameLoop();
         });
     } else {
-        // Fallback for browsers without the Font Loading API.
-        setTimeout(function () {
-            if (statusEl) statusEl.textContent = "Ready (fallback)";
-            gameLoop();
-        }, 500);
+        setTimeout(function () { gameLoop(); }, 500);
     }
 })();

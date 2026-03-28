@@ -92,7 +92,7 @@ def build(output_path: str | None = None) -> str:
     sin_base, sin_size = codegen.allocator.arrays["sin_table"]
     cos_base, cos_size = codegen.allocator.arrays["cos_table"]
     map_base, map_size = codegen.allocator.arrays["map_data"]
-    enemy_base, enemy_size = codegen.allocator.arrays["enemy_data"]
+    # enemy_data removed in stateless renderer architecture
 
     # --- Generate sin/cos tables ---
     sin_table, cos_table = generate_sin_cos_tables(entries=256, scale=256)
@@ -118,7 +118,7 @@ def build(output_path: str | None = None) -> str:
         cos_base + cos_size,
         sin_base + sin_size,
         map_base + map_size,
-        enemy_base + enemy_size,
+        # enemy data removed
     )
 
     # --- Build font ---
@@ -140,7 +140,7 @@ def build(output_path: str | None = None) -> str:
     print(f"  Sin table: indices {sin_base}..{sin_base + sin_size - 1}")
     print(f"  Cos table: indices {cos_base}..{cos_base + cos_size - 1}")
     print(f"  Map data:  indices {map_base}..{map_base + map_size - 1}")
-    print(f"  Enemy data: indices {enemy_base}..{enemy_base + enemy_size - 1}")
+    # enemy data removed in stateless renderer architecture
     print(f"  fpgm: {len(result['fpgm'])} asm lines")
     print(f"  prep: {len(full_prep)} asm lines (base {len(result['prep'])} + tables {len(table_asm)} + map {len(map_asm)})")
     print(f"  glyph: {len(result['glyph'])} asm lines")
