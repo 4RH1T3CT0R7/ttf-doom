@@ -8,7 +8,7 @@ const MAP_W = 16
 const MAP_H = 16
 const CELL_SIZE = 64
 const NUM_COLS = 16
-const FOV_HALF = 8
+const FOV_HALF = 24
 const WALL_SCALE = 900
 const MAX_STEPS = 14
 

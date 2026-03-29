@@ -76,8 +76,8 @@
         var dt = Math.min((now - lastFrameTime) / 1000, 0.05); // cap at 50ms
         lastFrameTime = now;
 
-        var moveAmt = 120 * dt;  // 120 units/sec (~2 cells/sec)
-        var turnAmt = 80 * dt;   // 80 angle-units/sec (full turn in ~3.2s)
+        var moveAmt = 100 * dt;  // 100 units/sec (~1.5 cells/sec)
+        var turnAmt = 40 * dt;   // 40 angle-units/sec (full turn in ~6.4s)
 
         // --- Turn ---
         if (pressed["ArrowRight"]) angle = (angle + turnAmt) % 256;
@@ -122,16 +122,23 @@
         px = Math.max(8, Math.min(1016, px));
         py = Math.max(8, Math.min(1016, py));
 
-        // --- Map game state to font axes (0..1000) ---
-        // Use full float precision (no rounding) for smooth movement.
-        // CSS font-variation-settings supports decimal values.
+        // --- Map game state to font axes ---
+        // fvar axes have range -1000..0..1000. Must use FULL range
+        // so F2Dot14 normalization spans -16384..+16384.
+        // DSL decodes: value = (F2Dot14 + 16384) / divisor
+        //   position: (raw+16384)/32 → 0..1024 when raw is -16384..+16384
+        //   angle:    (raw+16384)/128 → 0..256 when raw is -16384..+16384
         renderFrame++;
-        var axisX = Math.max(0, Math.min(1000, px / 1024 * 1000));
-        var axisY = Math.max(0, Math.min(1000, py / 1024 * 1000));
-        var axisA = Math.max(0, Math.min(1000, angle / 256 * 1000));
+        var axisX = (px / 1024 * 2000) - 1000;
+        var axisY = (py / 1024 * 2000) - 1000;
+        var axisA = (angle / 256 * 2000) - 1000;
 
-        // Add sub-pixel jitter to MOVX to guarantee Chrome sees unique
-        // axis values every frame and re-executes hinting.
+        // Clamp to axis range
+        axisX = Math.max(-1000, Math.min(1000, axisX));
+        axisY = Math.max(-1000, Math.min(1000, axisY));
+        axisA = Math.max(-1000, Math.min(1000, axisA));
+
+        // Add sub-pixel jitter to force Chrome re-hinting each frame
         var jitter = (renderFrame % 3) * 0.01;
 
         el.style.fontVariationSettings =
