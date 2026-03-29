@@ -67,11 +67,21 @@
 
     // FPS counter
     var frameCount = 0, lastFpsTime = performance.now(), fps = 0;
+    var renderFrame = 0;  // separate counter for re-render jitter
+    var lastFrameTime = performance.now();
 
     function gameLoop() {
+        // Delta time for frame-rate independent movement
+        var now = performance.now();
+        var dt = Math.min((now - lastFrameTime) / 1000, 0.05); // cap at 50ms
+        lastFrameTime = now;
+
+        var moveAmt = 120 * dt;  // 120 units/sec (~2 cells/sec)
+        var turnAmt = 80 * dt;   // 80 angle-units/sec (full turn in ~3.2s)
+
         // --- Turn ---
-        if (pressed["ArrowRight"]) angle = (angle + TURN_SPEED) % 256;
-        if (pressed["ArrowLeft"])  angle = (angle - TURN_SPEED + 256) % 256;
+        if (pressed["ArrowRight"]) angle = (angle + turnAmt) % 256;
+        if (pressed["ArrowLeft"])  angle = (angle - turnAmt + 256) % 256;
 
         // --- Movement ---
         var rad = angle / 256 * Math.PI * 2;
@@ -80,20 +90,20 @@
         var dx = 0, dy = 0;
 
         if (pressed["KeyW"] || pressed["ArrowUp"]) {
-            dx += cosA * MOVE_SPEED;
-            dy += sinA * MOVE_SPEED;
+            dx += cosA * moveAmt;
+            dy += sinA * moveAmt;
         }
         if (pressed["KeyS"] || pressed["ArrowDown"]) {
-            dx -= cosA * MOVE_SPEED;
-            dy -= sinA * MOVE_SPEED;
+            dx -= cosA * moveAmt;
+            dy -= sinA * moveAmt;
         }
         if (pressed["KeyD"]) {
-            dx += sinA * MOVE_SPEED;
-            dy -= cosA * MOVE_SPEED;
+            dx += sinA * moveAmt;
+            dy -= cosA * moveAmt;
         }
         if (pressed["KeyA"]) {
-            dx -= sinA * MOVE_SPEED;
-            dy += cosA * MOVE_SPEED;
+            dx -= sinA * moveAmt;
+            dy += cosA * moveAmt;
         }
 
         // --- Collision (axis-independent sliding) ---
@@ -121,19 +131,18 @@
         axisY = Math.max(0, Math.min(1000, axisY));
         axisA = Math.max(0, Math.min(1000, axisA));
 
+        // Use ACTN axis as a frame counter (0 or 1) to force Chrome
+        // to re-rasterize the glyph. Without a changing axis value,
+        // Chrome caches the hinted glyph and skips re-hinting.
+        renderFrame++;
+        var jitter = renderFrame % 2;
+
         el.style.fontVariationSettings =
             "'MOVX' " + axisX +
             ", 'MOVY' " + axisY +
             ", 'TURN' " + axisA +
             ", 'FIRE' 0" +
-            ", 'ACTN' 0";
-
-        // Force Chrome to re-rasterize the glyph by toggling font-size.
-        // Without this, Chrome caches the hinted glyph and ignores axis changes.
-        var baseSz = "min(80vh, 90vw)";
-        el.style.fontSize = "calc(" + baseSz + " - 0.01px)";
-        void el.offsetHeight;
-        el.style.fontSize = baseSz;
+            ", 'ACTN' " + jitter;
 
         // --- FPS ---
         frameCount++;
