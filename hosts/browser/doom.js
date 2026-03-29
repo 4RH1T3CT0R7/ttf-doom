@@ -123,26 +123,23 @@
         py = Math.max(8, Math.min(1016, py));
 
         // --- Map game state to font axes (0..1000) ---
-        var axisX = Math.round(px / 1024 * 1000);
-        var axisY = Math.round(py / 1024 * 1000);
-        var axisA = Math.round(angle / 256 * 1000);
-
-        axisX = Math.max(0, Math.min(1000, axisX));
-        axisY = Math.max(0, Math.min(1000, axisY));
-        axisA = Math.max(0, Math.min(1000, axisA));
-
-        // Use ACTN axis as a frame counter (0 or 1) to force Chrome
-        // to re-rasterize the glyph. Without a changing axis value,
-        // Chrome caches the hinted glyph and skips re-hinting.
+        // Use full float precision (no rounding) for smooth movement.
+        // CSS font-variation-settings supports decimal values.
         renderFrame++;
-        var jitter = renderFrame % 2;
+        var axisX = Math.max(0, Math.min(1000, px / 1024 * 1000));
+        var axisY = Math.max(0, Math.min(1000, py / 1024 * 1000));
+        var axisA = Math.max(0, Math.min(1000, angle / 256 * 1000));
+
+        // Add sub-pixel jitter to MOVX to guarantee Chrome sees unique
+        // axis values every frame and re-executes hinting.
+        var jitter = (renderFrame % 3) * 0.01;
 
         el.style.fontVariationSettings =
-            "'MOVX' " + axisX +
-            ", 'MOVY' " + axisY +
-            ", 'TURN' " + axisA +
+            "'MOVX' " + (axisX + jitter).toFixed(3) +
+            ", 'MOVY' " + axisY.toFixed(3) +
+            ", 'TURN' " + axisA.toFixed(3) +
             ", 'FIRE' 0" +
-            ", 'ACTN' " + jitter;
+            ", 'ACTN' 0";
 
         // --- FPS ---
         frameCount++;
