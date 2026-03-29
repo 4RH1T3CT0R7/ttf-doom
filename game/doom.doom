@@ -55,7 +55,7 @@ func get_map(gx: int, gy: int) -> int:
 
 # --- Ray marcher ---
 func raycast(col: int) -> int:
-    var ra: int = player_angle + col - FOV_HALF
+    var ra: int = player_angle + col * 3 - FOV_HALF
     if ra < 0:
         ra = ra + 256
     if ra >= 256:
