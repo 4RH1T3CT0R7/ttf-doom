@@ -14,7 +14,7 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-        background: #111;
+        background: #000;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -26,7 +26,7 @@
 
     #game {
         font-family: 'DoomFont', monospace;
-        font-size: min(80vh, 90vw);
+        font-size: min(95vh, 95vw);
         color: #33ff33;
         line-height: 1;
         letter-spacing: 0;
@@ -38,6 +38,48 @@
             'ACTN' 0;
         user-select: none;
         -webkit-user-select: none;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+    }
+
+    /* Crosshair */
+    #crosshair {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        z-index: 10;
+    }
+    #crosshair::before,
+    #crosshair::after {
+        content: '';
+        position: absolute;
+        background: rgba(0, 200, 0, 0.6);
+    }
+    #crosshair::before {
+        width: 20px;
+        height: 2px;
+        top: -1px;
+        left: -10px;
+    }
+    #crosshair::after {
+        width: 2px;
+        height: 20px;
+        top: -10px;
+        left: -1px;
+    }
+
+    /* Minimap */
+    #minimap {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        border: 1px solid #333;
+        z-index: 10;
+        image-rendering: pixelated;
     }
 
     #hud {
@@ -47,6 +89,7 @@
         bottom: 12px;
         left: 12px;
         line-height: 1.5;
+        z-index: 10;
     }
 
     #hud kbd {
@@ -62,26 +105,30 @@
         font-size: 11px;
         position: fixed;
         top: 8px;
-        right: 12px;
+        left: 12px;
+        z-index: 10;
     }
 
     #title {
         color: #c00;
         font-size: 22px;
         font-weight: bold;
-        margin-bottom: 8px;
+        position: fixed;
+        bottom: 40px;
+        left: 12px;
         letter-spacing: 4px;
+        z-index: 10;
     }
 </style>
 </head>
 <body>
-    <div id="title">TTDOOM</div>
     <div id="game">A</div>
+    <div id="crosshair"></div>
+    <canvas id="minimap" width="150" height="150"></canvas>
+    <div id="title">TTDOOM</div>
     <div id="hud">
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
-        <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn &nbsp;
-        <kbd>Space</kbd> fire &nbsp;
-        <kbd>E</kbd> action
+        <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn
     </div>
     <div id="status">Loading font...</div>
     <script src="doom.js"></script>
