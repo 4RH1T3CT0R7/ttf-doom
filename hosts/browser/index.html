@@ -45,6 +45,14 @@
     }
 
     /* Crosshair */
+    #overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+        z-index: 5;
+    }
+
     #crosshair {
         position: fixed;
         top: 50%;
@@ -123,12 +131,15 @@
 </head>
 <body>
     <div id="game">A</div>
+    <canvas id="overlay"></canvas>
     <div id="crosshair"></div>
     <canvas id="minimap" width="150" height="150"></canvas>
     <div id="title">TTDOOM</div>
     <div id="hud">
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
-        <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn
+        <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn &nbsp;
+        <kbd>Space</kbd> shoot &nbsp;
+        <kbd>R</kbd> restart
     </div>
     <div id="status">Loading font...</div>
     <script src="doom.js"></script>
