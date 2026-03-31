@@ -44,11 +44,12 @@
     var ENEMY_DAMAGE = 35;       // damage per shot
 
     // Initial enemy spawn data (kept so we can reset on restart)
+    // Spawn positions verified: all in open cells (map value = 0)
     var ENEMY_SPAWNS = [
-        { x: 700, y: 200, hp: 100, type: 1 },
-        { x: 300, y: 800, hp: 100, type: 1 },
-        { x: 800, y: 700, hp: 100, type: 2 },
-        { x: 200, y: 300, hp: 150, type: 2 }
+        { x: 450, y: 200, hp: 100, type: 1 },  // cell(7,3) — open
+        { x: 300, y: 800, hp: 100, type: 1 },   // cell(4,12) — open
+        { x: 800, y: 480, hp: 100, type: 2 },   // cell(12,7) — open
+        { x: 320, y: 480, hp: 150, type: 2 }    // cell(5,7) — open
     ];
 
     var enemies = [];
@@ -59,7 +60,7 @@
         var ddy = y1 - y0;
         var dist = Math.sqrt(ddx * ddx + ddy * ddy);
         if (dist < 1) return true;
-        var steps = Math.ceil(dist / 16); // check every 16 units
+        var steps = Math.ceil(dist / 4); // check every 4 units for precision
         for (var i = 1; i < steps; i++) {
             var t = i / steps;
             var cx = x0 + ddx * t;

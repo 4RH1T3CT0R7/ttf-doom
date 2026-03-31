@@ -82,7 +82,7 @@ func raycast(col: int) -> int:
 # --- Render one column ---
 func render_col(c: int):
     var d: int = raycast(c)
-    var h: int = 0
+    var h: int = 30
     if d > 0:
         h = WALL_SCALE / d
     if h > 900:
