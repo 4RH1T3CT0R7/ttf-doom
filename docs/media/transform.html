@@ -9,197 +9,263 @@
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: #0a0a0a;
+    background: #080808;
     display: flex;
     justify-content: center;
     align-items: center;
     height: 100vh;
     overflow: hidden;
-    font-family: monospace;
+    font-family: 'Consolas', 'Courier New', monospace;
   }
-  #stage {
-    position: relative;
-    width: 900px;
-    height: 500px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* Phase 1: Normal letter A */
-  #normal-a {
-    position: absolute;
-    font-family: 'Arial', sans-serif;
-    font-size: 300px;
-    color: #33ff33;
-    opacity: 1;
-    transition: all 1.5s ease-in-out;
-  }
-  #normal-a.fade { opacity: 0; transform: scale(0.5); }
-
-  /* Arrow */
-  #arrow {
-    position: absolute;
-    font-size: 60px;
-    color: #666;
-    opacity: 0;
-    transition: opacity 0.5s;
-  }
-  #arrow.show { opacity: 1; }
-
-  /* Phase 2: Font glyph A (the bars) */
-  #doom-a {
-    position: absolute;
-    font-family: 'DoomFont', monospace;
-    font-size: 400px;
-    color: #33ff33;
-    line-height: 1;
-    opacity: 0;
-    font-variation-settings: 'MOVX' -62.5, 'MOVY' -62.5, 'TURN' -1000, 'FIRE' 0, 'ACTN' 0;
-    transition: all 1.5s ease-in-out;
-  }
-  #doom-a.show { opacity: 1; }
-  #doom-a.morph {
-    font-variation-settings: 'MOVX' -62.5, 'MOVY' -62.5, 'TURN' -1000, 'FIRE' 0, 'ACTN' 1;
-  }
-
-  /* Labels */
-  .label {
-    position: absolute;
-    color: #0f0;
-    font-size: 14px;
-    opacity: 0;
-    transition: opacity 0.8s;
-    white-space: nowrap;
-  }
-  .label.show { opacity: 1; }
-
-  #label-normal { top: 30px; left: 50%; transform: translateX(-50%); }
-  #label-font { top: 30px; left: 50%; transform: translateX(-50%); }
-  #label-axes { bottom: 40px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #0a0; }
-  #label-render { top: 30px; left: 50%; transform: translateX(-50%); }
-
-  /* Phase indicators */
-  #phase {
-    position: absolute;
-    bottom: 15px;
-    left: 50%;
-    transform: translateX(-50%);
-    color: #333;
-    font-size: 11px;
-  }
+  canvas { display: block; }
 </style>
 </head>
 <body>
-<div id="stage">
-  <div id="normal-a">A</div>
-  <div id="doom-a">A</div>
-  <div id="arrow">→</div>
-
-  <div id="label-normal" class="label">Standard glyph — Arial "A"</div>
-  <div id="label-font" class="label">doom.ttf glyph — 16 bar contours, 64 points</div>
-  <div id="label-axes" class="label"></div>
-  <div id="label-render" class="label">TrueType hinting raycasts → 3D wall rendering</div>
-
-  <div id="phase"></div>
-</div>
-
+<canvas id="c" width="900" height="500"></canvas>
 <script>
-var doomA = document.getElementById('doom-a');
-var normalA = document.getElementById('normal-a');
-var labelNormal = document.getElementById('label-normal');
-var labelFont = document.getElementById('label-font');
-var labelAxes = document.getElementById('label-axes');
-var labelRender = document.getElementById('label-render');
-var phase = document.getElementById('phase');
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+var W = 900, H = 500;
 
-// Animation timeline
-var steps = [
-  // Phase 1: Show normal A
-  { t: 500, fn: function() {
-    labelNormal.classList.add('show');
-    phase.textContent = '1/4 — Standard font glyph';
-  }},
-
-  // Phase 2: Fade normal A, show doom font A (default = flat bars)
-  { t: 3000, fn: function() {
-    normalA.classList.add('fade');
-    labelNormal.classList.remove('show');
-    phase.textContent = '2/4 — Loading doom.ttf...';
-  }},
-  { t: 4500, fn: function() {
-    doomA.classList.add('show');
-    labelFont.classList.add('show');
-    phase.textContent = '2/4 — doom.ttf: 16 vertical bar contours';
-  }},
-
-  // Phase 3: Animate axes — show font-variation-settings changing
-  { t: 7000, fn: function() {
-    labelFont.classList.remove('show');
-    labelAxes.classList.add('show');
-    phase.textContent = '3/4 — Passing position via font-variation-settings...';
-    animateAxes();
-  }},
-
-  // Phase 4: Final — full 3D render
-  { t: 13000, fn: function() {
-    labelAxes.classList.remove('show');
-    labelRender.classList.add('show');
-    phase.textContent = '4/4 — Hinting VM raycasts, SCFS repositions bars → 3D view';
-  }},
-
-  // Loop
-  { t: 17000, fn: function() {
-    // Reset
-    normalA.classList.remove('fade');
-    doomA.classList.remove('show');
-    labelRender.classList.remove('show');
-    doomA.style.fontVariationSettings = "'MOVX' -62.5, 'MOVY' -62.5, 'TURN' -1000, 'FIRE' 0, 'ACTN' 0";
-    phase.textContent = '';
-    // Restart
-    setTimeout(runTimeline, 1000);
-  }}
+// Precompute bar heights for the doom font view at pos=(480,480) angle=0
+var MAP = [
+  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+  1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,
+  1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+  1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+  1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,
+  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+  1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,
+  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+  1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+  1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,
+  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
 ];
 
-function animateAxes() {
-  var startTime = performance.now();
-  var duration = 5500;
+function isWall(x, y) {
+  var gx = Math.floor(x / 64), gy = Math.floor(y / 64);
+  if (gx < 0 || gx >= 16 || gy < 0 || gy >= 16) return true;
+  return MAP[gy * 16 + gx] === 1;
+}
 
-  function tick() {
-    var elapsed = performance.now() - startTime;
-    var t = Math.min(1, elapsed / duration);
-
-    // Smoothly change angle from -1000 to 1000 and back
-    var angle = Math.sin(t * Math.PI * 2) * 800;
-    // Move forward slightly
-    var moveX = -62.5 + t * 300;
-
-    doomA.style.fontVariationSettings =
-      "'MOVX' " + moveX.toFixed(1) +
-      ", 'MOVY' -62.5" +
-      ", 'TURN' " + angle.toFixed(1) +
-      ", 'FIRE' 0, 'ACTN' " + (Math.floor(elapsed / 50) % 2);
-
-    labelAxes.textContent =
-      "font-variation-settings: 'MOVX' " + moveX.toFixed(1) +
-      ", 'TURN' " + angle.toFixed(1) +
-      "  →  GETVARIATION[] → raycast → SCFS[]";
-
-    if (elapsed < duration) requestAnimationFrame(tick);
+function raycast(px, py, angle, col) {
+  var ra = angle + col * 3 - 24;
+  var dx = Math.cos(ra / 256 * Math.PI * 2) * 256;
+  var dy = Math.sin(ra / 256 * Math.PI * 2) * 256;
+  var rpx = px, rpy = py;
+  for (var s = 0; s < 14; s++) {
+    rpx += dx / 4; rpy += dy / 4;
+    if (isWall(rpx, rpy)) return s + 1;
   }
-  requestAnimationFrame(tick);
+  return 14;
 }
 
-function runTimeline() {
-  steps.forEach(function(step) {
-    setTimeout(step.fn, step.t);
-  });
+// Get target bar heights for the 3D view
+var targetHeights = [];
+for (var i = 0; i < 16; i++) {
+  var dist = raycast(480, 480, 0, i);
+  targetHeights.push(Math.min(0.9, 900 / dist / 1000));
 }
 
-// Wait for font to load
-document.fonts.ready.then(function() {
-  setTimeout(runTimeline, 500);
-});
+// Animation phases
+var startTime = null;
+var PHASE_DURATION = [
+  2500,  // Phase 0: Show letter A
+  2000,  // Phase 1: A dissolves into vertical slices
+  2000,  // Phase 2: Slices become uniform bars
+  2500,  // Phase 3: Bars morph to 3D heights
+  3000,  // Phase 4: Full 3D with labels
+  1500   // Phase 5: Fade + reset
+];
+var totalDuration = PHASE_DURATION.reduce(function(a,b){return a+b}, 0);
+
+function getPhase(t) {
+  var acc = 0;
+  for (var i = 0; i < PHASE_DURATION.length; i++) {
+    acc += PHASE_DURATION[i];
+    if (t < acc) return { phase: i, progress: (t - (acc - PHASE_DURATION[i])) / PHASE_DURATION[i] };
+  }
+  return { phase: PHASE_DURATION.length - 1, progress: 1 };
+}
+
+function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+function drawFrame(timestamp) {
+  if (!startTime) startTime = timestamp;
+  var elapsed = (timestamp - startTime) % totalDuration;
+  var p = getPhase(elapsed);
+  var phase = p.phase;
+  var t = p.progress;
+  var et = easeInOut(Math.min(1, t));
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#080808';
+  ctx.fillRect(0, 0, W, H);
+
+  var cx = W / 2, cy = H / 2;
+  var barW = 28, gap = 4;
+  var totalW = 16 * (barW + gap) - gap;
+  var startX = cx - totalW / 2;
+
+  if (phase === 0) {
+    // Phase 0: Standard letter A
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#33ff33';
+    ctx.font = '280px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('A', cx, cy - 10);
+    ctx.restore();
+
+    // Label
+    ctx.fillStyle = '#888';
+    ctx.font = '14px Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Standard font glyph', cx, 35);
+
+  } else if (phase === 1) {
+    // Phase 1: A slices into 16 vertical strips
+    // Draw the letter clipped into 16 columns, spreading apart
+    var spread = et * 20; // gap grows
+    for (var col = 0; col < 16; col++) {
+      ctx.save();
+      var colX = startX + col * (barW + gap * (1 + spread / 4));
+      var clipW = barW + 2;
+      // Source position in the original A
+      var srcX = cx - 220 + col * (440 / 16);
+
+      ctx.beginPath();
+      ctx.rect(colX - 1, 0, clipW + 2, H);
+      ctx.clip();
+
+      ctx.fillStyle = '#33ff33';
+      ctx.font = '280px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      // Shift the text so the right slice shows
+      var offset = colX + clipW / 2 - srcX;
+      ctx.fillText('A', cx + offset, cy - 10);
+      ctx.restore();
+    }
+
+    ctx.fillStyle = '#888';
+    ctx.font = '14px Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Slicing into 16 vertical contours...', cx, 35);
+
+  } else if (phase === 2) {
+    // Phase 2: Slices become uniform green bars
+    var uniformH = 0.5; // target uniform height
+    for (var col = 0; col < 16; col++) {
+      var x = startX + col * (barW + gap);
+      var barH = H * uniformH * et + (1 - et) * H * 0.65;
+      var barY = cy - barH / 2;
+
+      // Transition from letter slice to solid bar
+      ctx.fillStyle = '#33ff33';
+      ctx.globalAlpha = 0.3 + 0.7 * et;
+      ctx.fillRect(x, barY, barW, barH);
+      ctx.globalAlpha = 1;
+
+      // Bar outline
+      ctx.strokeStyle = '#1a8c1a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, barY, barW, barH);
+    }
+
+    ctx.fillStyle = '#888';
+    ctx.font = '14px Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('doom.ttf — 16 bar contours, 64 points', cx, 35);
+    ctx.fillStyle = '#555';
+    ctx.font = '12px Consolas, monospace';
+    ctx.fillText('font-variation-settings: \'MOVX\' -62.5, \'MOVY\' -62.5, \'TURN\' -1000', cx, H - 25);
+
+  } else if (phase === 3) {
+    // Phase 3: Bars morph to raycasted 3D heights
+    for (var col = 0; col < 16; col++) {
+      var x = startX + col * (barW + gap);
+      var uniformH = 0.5;
+      var finalH = targetHeights[col];
+      var barH = H * (uniformH + (finalH - uniformH) * et);
+      var barY = cy - barH / 2;
+
+      // Color: closer walls are brighter
+      var brightness = Math.floor(40 + 180 * (barH / H));
+      ctx.fillStyle = 'rgb(0,' + brightness + ',0)';
+      ctx.fillRect(x, barY, barW, barH);
+      ctx.strokeStyle = '#0a4a0a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, barY, barW, barH);
+    }
+
+    ctx.fillStyle = '#888';
+    ctx.font = '14px Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Hinting VM raycasts → SCFS repositions points → 3D view', cx, 35);
+
+    // Show axis values changing
+    var turnVal = (-1000 + 2000 * et).toFixed(0);
+    ctx.fillStyle = '#555';
+    ctx.font = '12px Consolas, monospace';
+    ctx.fillText("font-variation-settings: 'MOVX' -62.5, 'TURN' " + turnVal, cx, H - 25);
+
+  } else if (phase === 4) {
+    // Phase 4: Final 3D view with full labels
+    for (var col = 0; col < 16; col++) {
+      var x = startX + col * (barW + gap);
+      var barH = H * targetHeights[col];
+      var barY = cy - barH / 2;
+      var brightness = Math.floor(40 + 180 * (barH / H));
+      ctx.fillStyle = 'rgb(0,' + brightness + ',0)';
+      ctx.fillRect(x, barY, barW, barH);
+      ctx.strokeStyle = '#0a4a0a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, barY, barW, barH);
+    }
+
+    // Labels
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('3D raycasting in TrueType font hinting bytecode', cx, 30);
+
+    ctx.fillStyle = '#666';
+    ctx.font = '13px Consolas, monospace';
+    ctx.fillText('doom.ttf • 6,580 bytes • 13 FDEF functions • 795 storage slots', cx, H - 20);
+
+    // Column indices
+    ctx.fillStyle = '#444';
+    ctx.font = '9px Consolas, monospace';
+    for (var col = 0; col < 16; col++) {
+      var x = startX + col * (barW + gap) + barW / 2;
+      ctx.fillText(col, x, cy + H * targetHeights[col] / 2 + 14);
+    }
+
+  } else if (phase === 5) {
+    // Phase 5: Fade out
+    ctx.globalAlpha = 1 - et;
+    for (var col = 0; col < 16; col++) {
+      var x = startX + col * (barW + gap);
+      var barH = H * targetHeights[col];
+      var barY = cy - barH / 2;
+      var brightness = Math.floor(40 + 180 * (barH / H));
+      ctx.fillStyle = 'rgb(0,' + brightness + ',0)';
+      ctx.fillRect(x, barY, barW, barH);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(drawFrame);
+}
+
+requestAnimationFrame(drawFrame);
 </script>
 </body>
 </html>

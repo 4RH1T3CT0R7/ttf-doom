@@ -37,7 +37,7 @@
     var SHOT_COOLDOWN = 0.3; // seconds
     var dead = false;
 
-    // Debug overlay (toggled with D key, non-repeat only)
+    // Debug overlay (toggled with Tab key)
     var debugMode = false;
 
     // --- Enemies ---
@@ -113,8 +113,8 @@
         pressed[e.code] = true;
         if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) !== -1)
             e.preventDefault();
-        // Toggle debug overlay (only on first press, not held repeats)
-        if (e.code === "KeyD" && !e.repeat) debugMode = !debugMode;
+        // Toggle debug overlay with Tab (no conflict with movement keys)
+        if (e.code === "Tab" && !e.repeat) { debugMode = !debugMode; e.preventDefault(); }
     });
     document.addEventListener("keyup", function (e) { pressed[e.code] = false; });
 
