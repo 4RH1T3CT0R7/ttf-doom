@@ -67,7 +67,7 @@ for (var i = 0; i < 16; i++) {
 }
 
 // Animation
-var T = 24000; // long cycle — plenty of time for each phase
+var T = 30000; // 30 second cycle — slow and cinematic
 var t0 = null;
 function ease(t){return t<.5?2*t*t:-1+(4-2*t)*t;}
 function lerp(a,b,t){return a+(b-a)*t;}
@@ -88,12 +88,17 @@ function frame(ts) {
   // 0.56-0.78: bars morph to 3D raycasted heights
   // 0.76-0.96: hold final 3D view
 
-  // 24s cycle: letter 0-20%, crossfade 15-30%, split 28-42%, solid 40-52%, morph 50-70%, hold 68-90%
-  var tCrossfade = ease(clamp((raw - 0.15) / 0.15)); // 15-30%: letter → bars
-  var tSplit = ease(clamp((raw - 0.28) / 0.14));      // 28-42%: gaps appear
-  var tSolid = ease(clamp((raw - 0.40) / 0.12));      // 40-52%: uniform height
-  var tMorph = ease(clamp((raw - 0.50) / 0.20));      // 50-70%: 3D heights
-  var alpha = 1; // no fade — always visible
+  // 30s cycle — no crossfade, bars ARE the letter from the start:
+  // 0-20%: solid bars with letter heights, no gaps (looks like the letter A)
+  // 20-40%: gaps grow between bars (letter visually splits apart)
+  // 38-55%: bar heights equalize to uniform
+  // 53-75%: bars morph to 3D raycasted heights
+  // 75-95%: hold final 3D view
+  var tCrossfade = 1; // bars always visible, no separate letter
+  var tSplit = ease(clamp((raw - 0.20) / 0.20));      // 20-40%: gaps grow
+  var tSolid = ease(clamp((raw - 0.38) / 0.17));      // 38-55%: uniform height
+  var tMorph = ease(clamp((raw - 0.53) / 0.22));      // 53-75%: 3D heights
+  var alpha = 1;
 
   ctx.globalAlpha = alpha;
 
@@ -141,38 +146,10 @@ function frame(ts) {
     var bright = Math.floor(lerp(baseBright, distBright, tMorph));
     bright = Math.max(25, Math.min(230, bright));
 
-    ctx.save();
-
-    // CLIP to this column's strip
-    ctx.beginPath();
-    ctx.rect(x, 0, barW, H);
-    ctx.clip();
-
-    if (tCrossfade < 1) {
-      // Draw the REAL letter A clipped to this strip
-      // The letter needs to be positioned so strip `col` shows the right portion
-      // Strip col's original position in letter space: letterX + col * (letterW/16)
-      // Current strip position on screen: x
-      // Offset to align: letter is drawn at original position, clip shows the strip
-      var letterShift = x - (letterX + col * letterW / 16);
-      ctx.save();
-      ctx.globalAlpha = alpha * (1 - tCrossfade);
-      ctx.fillStyle = '#33ff33';
-      ctx.font = 'bold 320px Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('A', W/2 + letterShift, H/2 - 15);
-      ctx.restore();
-    }
-
-    if (tCrossfade > 0) {
-      // Draw solid bar (fading in over letter)
-      ctx.save();
-      ctx.globalAlpha = alpha * tCrossfade;
-      ctx.fillStyle = 'rgb(0,' + bright + ',0)';
-      ctx.fillRect(x, y0, barW, barH);
-      ctx.restore();
-    }
+    // Draw the bar — in early phases heights match the letter shape,
+    // so touching bars look like the letter A
+    ctx.fillStyle = 'rgb(0,' + bright + ',0)';
+    ctx.fillRect(x, y0, barW, barH);
 
     // Edge lines (appear during split)
     if (tSplit > 0.05) {
@@ -181,7 +158,7 @@ function frame(ts) {
       ctx.strokeRect(x + 0.5, y0 + 0.5, barW - 1, barH - 1);
     }
 
-    ctx.restore(); // restore clip
+    // no clip restore needed
   }
 
   } // end of drawing block
@@ -193,12 +170,11 @@ function frame(ts) {
   ctx.font = '14px Consolas, Courier New, monospace';
 
   var label = '';
-  if (raw < 0.16) label = 'Standard font glyph — "A"';
-  else if (raw < 0.30) label = 'Glyph splits into 16 vertical contours';
-  else if (raw < 0.42) label = 'doom.ttf — contours separate into bars';
-  else if (raw < 0.52) label = 'doom.ttf — each bar is an independent contour';
-  else if (raw < 0.72) label = 'Hinting VM raycasts → SCFS stretches each bar';
-  else if (raw < 0.92) label = '3D rendered by TrueType font hinting bytecode';
+  if (raw < 0.22) label = 'Glyph "A" — 16 contours touching (no gaps)';
+  else if (raw < 0.40) label = 'Contours separate — glyph splits into independent bars';
+  else if (raw < 0.55) label = 'doom.ttf — bar heights equalize';
+  else if (raw < 0.76) label = 'Hinting VM raycasts → SCFS stretches each bar';
+  else if (raw < 0.95) label = '3D rendered by TrueType font hinting bytecode';
 
   if (label) {
     ctx.fillStyle = '#888';
