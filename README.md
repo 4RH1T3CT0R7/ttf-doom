@@ -31,6 +31,14 @@ The entire rendering engine fits in 6,580 bytes.
 
 ---
 
+## From glyph to 3D
+
+<p align="center">
+  <img src="docs/media/transform.gif" alt="Standard A glyph transforms into 3D raycaster view" width="640" />
+</p>
+
+A normal "A" glyph becomes 16 vertical bar contours. The hinting VM reads player position from `font-variation-settings`, raycasts against the map, and repositions bar heights via SCFS. The result: a 3D perspective view rendered entirely by the font engine.
+
 ## How it works
 
 A custom DSL compiles to TrueType hinting bytecode. The bytecode is injected into a `.ttf` font containing 16 vertical bar contours. JavaScript passes player position and angle through `font-variation-settings`, the font's hinting VM raycasts against a 16x16 map, and SCFS instructions reposition the bars to form a 3D perspective view.

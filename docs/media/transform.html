@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face {
+    font-family: 'DoomFont';
+    src: url('../doom.ttf') format('truetype');
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    font-family: monospace;
+  }
+  #stage {
+    position: relative;
+    width: 900px;
+    height: 500px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Phase 1: Normal letter A */
+  #normal-a {
+    position: absolute;
+    font-family: 'Arial', sans-serif;
+    font-size: 300px;
+    color: #33ff33;
+    opacity: 1;
+    transition: all 1.5s ease-in-out;
+  }
+  #normal-a.fade { opacity: 0; transform: scale(0.5); }
+
+  /* Arrow */
+  #arrow {
+    position: absolute;
+    font-size: 60px;
+    color: #666;
+    opacity: 0;
+    transition: opacity 0.5s;
+  }
+  #arrow.show { opacity: 1; }
+
+  /* Phase 2: Font glyph A (the bars) */
+  #doom-a {
+    position: absolute;
+    font-family: 'DoomFont', monospace;
+    font-size: 400px;
+    color: #33ff33;
+    line-height: 1;
+    opacity: 0;
+    font-variation-settings: 'MOVX' -62.5, 'MOVY' -62.5, 'TURN' -1000, 'FIRE' 0, 'ACTN' 0;
+    transition: all 1.5s ease-in-out;
+  }
+  #doom-a.show { opacity: 1; }
+  #doom-a.morph {
+    font-variation-settings: 'MOVX' -62.5, 'MOVY' -62.5, 'TURN' -1000, 'FIRE' 0, 'ACTN' 1;
+  }
+
+  /* Labels */
+  .label {
+    position: absolute;
+    color: #0f0;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.8s;
+    white-space: nowrap;
+  }
+  .label.show { opacity: 1; }
+
+  #label-normal { top: 30px; left: 50%; transform: translateX(-50%); }
+  #label-font { top: 30px; left: 50%; transform: translateX(-50%); }
+  #label-axes { bottom: 40px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #0a0; }
+  #label-render { top: 30px; left: 50%; transform: translateX(-50%); }
+
+  /* Phase indicators */
+  #phase {
+    position: absolute;
+    bottom: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #333;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="normal-a">A</div>
+  <div id="doom-a">A</div>
+  <div id="arrow">→</div>
+
+  <div id="label-normal" class="label">Standard glyph — Arial "A"</div>
+  <div id="label-font" class="label">doom.ttf glyph — 16 bar contours, 64 points</div>
+  <div id="label-axes" class="label"></div>
+  <div id="label-render" class="label">TrueType hinting raycasts → 3D wall rendering</div>
+
+  <div id="phase"></div>
+</div>
+
+<script>
+var doomA = document.getElementById('doom-a');
+var normalA = document.getElementById('normal-a');
+var labelNormal = document.getElementById('label-normal');
+var labelFont = document.getElementById('label-font');
+var labelAxes = document.getElementById('label-axes');
+var labelRender = document.getElementById('label-render');
+var phase = document.getElementById('phase');
+
+// Animation timeline
+var steps = [
+  // Phase 1: Show normal A
+  { t: 500, fn: function() {
+    labelNormal.classList.add('show');
+    phase.textContent = '1/4 — Standard font glyph';
+  }},
+
+  // Phase 2: Fade normal A, show doom font A (default = flat bars)
+  { t: 3000, fn: function() {
+    normalA.classList.add('fade');
+    labelNormal.classList.remove('show');
+    phase.textContent = '2/4 — Loading doom.ttf...';
+  }},
+  { t: 4500, fn: function() {
+    doomA.classList.add('show');
+    labelFont.classList.add('show');
+    phase.textContent = '2/4 — doom.ttf: 16 vertical bar contours';
+  }},
+
+  // Phase 3: Animate axes — show font-variation-settings changing
+  { t: 7000, fn: function() {
+    labelFont.classList.remove('show');
+    labelAxes.classList.add('show');
+    phase.textContent = '3/4 — Passing position via font-variation-settings...';
+    animateAxes();
+  }},
+
+  // Phase 4: Final — full 3D render
+  { t: 13000, fn: function() {
+    labelAxes.classList.remove('show');
+    labelRender.classList.add('show');
+    phase.textContent = '4/4 — Hinting VM raycasts, SCFS repositions bars → 3D view';
+  }},
+
+  // Loop
+  { t: 17000, fn: function() {
+    // Reset
+    normalA.classList.remove('fade');
+    doomA.classList.remove('show');
+    labelRender.classList.remove('show');
+    doomA.style.fontVariationSettings = "'MOVX' -62.5, 'MOVY' -62.5, 'TURN' -1000, 'FIRE' 0, 'ACTN' 0";
+    phase.textContent = '';
+    // Restart
+    setTimeout(runTimeline, 1000);
+  }}
+];
+
+function animateAxes() {
+  var startTime = performance.now();
+  var duration = 5500;
+
+  function tick() {
+    var elapsed = performance.now() - startTime;
+    var t = Math.min(1, elapsed / duration);
+
+    // Smoothly change angle from -1000 to 1000 and back
+    var angle = Math.sin(t * Math.PI * 2) * 800;
+    // Move forward slightly
+    var moveX = -62.5 + t * 300;
+
+    doomA.style.fontVariationSettings =
+      "'MOVX' " + moveX.toFixed(1) +
+      ", 'MOVY' -62.5" +
+      ", 'TURN' " + angle.toFixed(1) +
+      ", 'FIRE' 0, 'ACTN' " + (Math.floor(elapsed / 50) % 2);
+
+    labelAxes.textContent =
+      "font-variation-settings: 'MOVX' " + moveX.toFixed(1) +
+      ", 'TURN' " + angle.toFixed(1) +
+      "  →  GETVARIATION[] → raycast → SCFS[]";
+
+    if (elapsed < duration) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function runTimeline() {
+  steps.forEach(function(step) {
+    setTimeout(step.fn, step.t);
+  });
+}
+
+// Wait for font to load
+document.fonts.ready.then(function() {
+  setTimeout(runTimeline, 500);
+});
+</script>
+</body>
+</html>
