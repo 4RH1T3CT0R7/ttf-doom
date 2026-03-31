@@ -67,7 +67,7 @@ for (var i = 0; i < 16; i++) {
 }
 
 // Animation
-var T = 18000; // longer cycle — more time for letter phase
+var T = 24000; // long cycle — plenty of time for each phase
 var t0 = null;
 function ease(t){return t<.5?2*t*t:-1+(4-2*t)*t;}
 function lerp(a,b,t){return a+(b-a)*t;}
@@ -81,20 +81,27 @@ function frame(ts) {
   ctx.fillRect(0, 0, W, H);
 
   // Timeline:
-  // 0.00-0.10: full letter A (no gaps)
-  // 0.10-0.35: letter splits — gaps appear, letter shape visible in bars
-  // 0.35-0.55: bars solidify — color brightens, shapes simplify
-  // 0.55-0.80: bars morph to 3D heights — each bar stretches/shrinks
-  // 0.80-0.92: final hold with labels
-  // 0.92-1.00: fade out
+  // 0.00-0.16: solid letter A drawn with fillText (real glyph)
+  // 0.12-0.30: cross-fade from real letter to bar representation
+  // 0.28-0.46: bars separate (gaps grow), letter shape in bars
+  // 0.44-0.58: bars solidify to uniform height
+  // 0.56-0.78: bars morph to 3D raycasted heights
+  // 0.76-0.96: hold final 3D view
 
-  // Slower start: letter visible for 18% of cycle before splitting begins
-  var tSplit = ease(clamp((raw - 0.18) / 0.22));  // gap appears at 18%
-  var tSolid = ease(clamp((raw - 0.38) / 0.18));  // color unifies
-  var tMorph = ease(clamp((raw - 0.54) / 0.22));  // heights change
-  var alpha = clamp(raw / 0.03); // quick fade-in
+  // 24s cycle: letter 0-20%, crossfade 15-30%, split 28-42%, solid 40-52%, morph 50-70%, hold 68-90%
+  var tCrossfade = ease(clamp((raw - 0.15) / 0.15)); // 15-30%: letter → bars
+  var tSplit = ease(clamp((raw - 0.28) / 0.14));      // 28-42%: gaps appear
+  var tSolid = ease(clamp((raw - 0.40) / 0.12));      // 40-52%: uniform height
+  var tMorph = ease(clamp((raw - 0.50) / 0.20));      // 50-70%: 3D heights
+  var alpha = 1; // no fade — always visible
 
   ctx.globalAlpha = alpha;
+
+  // --- Draw letter A / bars as ONE continuous element ---
+  // Before crossfade: draw full letter A using fillText
+  // During crossfade: draw letter CLIPPED into 16 strips that spread apart
+  // After crossfade: draw solid bars
+  {
 
   // Bar layout
   var fullW = 480; // total width for all bars combined
@@ -105,18 +112,21 @@ function frame(ts) {
   var totalW = 16 * barW + 15 * gap;
   var startX = W/2 - totalW/2;
 
+  // Letter dimensions on screen
+  var letterW = 360; // approximate width of "A" at this font size
+  var letterX = W/2 - letterW/2; // left edge of letter
+
   for (var col = 0; col < 16; col++) {
     var x = startX + col * (barW + gap);
 
     // Height: letter shape → uniform → 3D target
     var lT = letterTops[col];
     var lB = letterBots[col];
-    var uT = 0.20; // uniform bar top
-    var uB = 0.80; // uniform bar bottom
-    var rT = tgtTops[col]; // 3D target top
-    var rB = tgtBots[col]; // 3D target bottom
+    var uT = 0.20;
+    var uB = 0.80;
+    var rT = tgtTops[col];
+    var rB = tgtBots[col];
 
-    // Blend: letter → uniform (during solid phase), uniform → 3D (during morph)
     var midT = lerp(lT, uT, tSolid);
     var midB = lerp(lB, uB, tSolid);
     var finT = lerp(midT, rT, tMorph);
@@ -126,34 +136,69 @@ function frame(ts) {
     var y1 = finB * H;
     var barH = y1 - y0;
 
-    // Color: starts as letter green, becomes distance-shaded
     var baseBright = 160;
     var distBright = 40 + 190 * (barH / H);
     var bright = Math.floor(lerp(baseBright, distBright, tMorph));
     bright = Math.max(25, Math.min(230, bright));
 
-    // Draw bar
-    ctx.fillStyle = 'rgb(0,' + bright + ',0)';
-    ctx.fillRect(x, y0, barW, barH);
+    ctx.save();
+
+    // CLIP to this column's strip
+    ctx.beginPath();
+    ctx.rect(x, 0, barW, H);
+    ctx.clip();
+
+    if (tCrossfade < 1) {
+      // Draw the REAL letter A clipped to this strip
+      // The letter needs to be positioned so strip `col` shows the right portion
+      // Strip col's original position in letter space: letterX + col * (letterW/16)
+      // Current strip position on screen: x
+      // Offset to align: letter is drawn at original position, clip shows the strip
+      var letterShift = x - (letterX + col * letterW / 16);
+      ctx.save();
+      ctx.globalAlpha = alpha * (1 - tCrossfade);
+      ctx.fillStyle = '#33ff33';
+      ctx.font = 'bold 320px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', W/2 + letterShift, H/2 - 15);
+      ctx.restore();
+    }
+
+    if (tCrossfade > 0) {
+      // Draw solid bar (fading in over letter)
+      ctx.save();
+      ctx.globalAlpha = alpha * tCrossfade;
+      ctx.fillStyle = 'rgb(0,' + bright + ',0)';
+      ctx.fillRect(x, y0, barW, barH);
+      ctx.restore();
+    }
 
     // Edge lines (appear during split)
     if (tSplit > 0.05) {
-      ctx.strokeStyle = 'rgba(0,' + Math.min(255, bright + 60) + ',0,' + (0.2 + 0.3 * tSolid) + ')';
+      ctx.strokeStyle = 'rgba(0,' + Math.min(255, bright + 60) + ',0,' + (0.15 + 0.35 * tSolid) + ')';
       ctx.lineWidth = 1;
       ctx.strokeRect(x + 0.5, y0 + 0.5, barW - 1, barH - 1);
     }
+
+    ctx.restore(); // restore clip
   }
+
+  } // end of drawing block
+
+  ctx.globalAlpha = alpha;
 
   // Labels
   ctx.textAlign = 'center';
   ctx.font = '14px Consolas, Courier New, monospace';
 
   var label = '';
-  if (raw < 0.20) label = 'Standard font glyph — "A"';
-  else if (raw < 0.40) label = 'Glyph contours split into 16 vertical bars';
-  else if (raw < 0.56) label = 'doom.ttf — each bar is an independent contour';
-  else if (raw < 0.78) label = 'Hinting VM raycasts → SCFS stretches each bar';
-  else if (raw < 0.95) label = '3D rendered by TrueType font hinting bytecode';
+  if (raw < 0.16) label = 'Standard font glyph — "A"';
+  else if (raw < 0.30) label = 'Glyph splits into 16 vertical contours';
+  else if (raw < 0.42) label = 'doom.ttf — contours separate into bars';
+  else if (raw < 0.52) label = 'doom.ttf — each bar is an independent contour';
+  else if (raw < 0.72) label = 'Hinting VM raycasts → SCFS stretches each bar';
+  else if (raw < 0.92) label = '3D rendered by TrueType font hinting bytecode';
 
   if (label) {
     ctx.fillStyle = '#888';
