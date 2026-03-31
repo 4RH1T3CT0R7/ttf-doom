@@ -53,6 +53,22 @@
 
     var enemies = [];
 
+    /** Check if there is a clear line of sight from (x0,y0) to (x1,y1) */
+    function hasLineOfSight(x0, y0, x1, y1) {
+        var ddx = x1 - x0;
+        var ddy = y1 - y0;
+        var dist = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (dist < 1) return true;
+        var steps = Math.ceil(dist / 16); // check every 16 units
+        for (var i = 1; i < steps; i++) {
+            var t = i / steps;
+            var cx = x0 + ddx * t;
+            var cy = y0 + ddy * t;
+            if (isWall(cx, cy)) return false;
+        }
+        return true;
+    }
+
     function spawnEnemies() {
         enemies = ENEMY_SPAWNS.map(function (s) {
             return { x: s.x, y: s.y, hp: s.hp, alive: true, type: s.type, hurtTimer: 0 };
@@ -335,6 +351,9 @@
 
             // FOV check
             if (Math.abs(relAngle) > fovHalfRad) return;
+
+            // Line-of-sight check: don't show enemies behind walls
+            if (!hasLineOfSight(px, py, e.x, e.y)) return;
 
             visible.push({ e: e, dist: dist, relAngle: relAngle });
         });
@@ -644,13 +663,13 @@
                 moving = true;
             }
             if (pressed["KeyD"]) {
-                dx += sinA * moveAmt;
-                dy -= cosA * moveAmt;
+                dx -= sinA * moveAmt;
+                dy += cosA * moveAmt;
                 moving = true;
             }
             if (pressed["KeyA"]) {
-                dx -= sinA * moveAmt;
-                dy += cosA * moveAmt;
+                dx += sinA * moveAmt;
+                dy -= cosA * moveAmt;
                 moving = true;
             }
 
