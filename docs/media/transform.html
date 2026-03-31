@@ -11,22 +11,18 @@
 <body>
 <canvas id="c" width="900" height="500"></canvas>
 <script>
-var C=document.getElementById('c'), ctx=C.getContext('2d'), W=900, H=500;
+var C=document.getElementById('c'), ctx=C.getContext('2d'), W=900, H=500, NUM=16;
 
-// Offscreen letter for slicing
+// Sample letter extents per column from offscreen render
 var lc=document.createElement('canvas'); lc.width=W; lc.height=H;
 var lx=lc.getContext('2d');
-function renderLetter(){
+var lTops=[], lBots=[];
+function init(){
   lx.fillStyle='#080808'; lx.fillRect(0,0,W,H);
   lx.fillStyle='#33ff33';
   lx.font='bold 320px Arial,sans-serif';
   lx.textAlign='center'; lx.textBaseline='middle';
   lx.fillText('A',W/2,H/2-10);
-}
-
-// Sample column extents from letter
-var NUM=16, lTops=[], lBots=[];
-function sample(){
   var sw=Math.ceil(W/NUM);
   for(var c=0;c<NUM;c++){
     var sx=c*sw, w=Math.min(sw,W-sx);
@@ -47,7 +43,7 @@ for(var i=0;i<NUM;i++){
   var h=Math.min(.92,900/d/H); tgtT[i]=.5-h/2; tgtB[i]=.5+h/2;
 }
 
-var T=28000,t0=null;
+var T=28000, t0=null;
 function ease(t){return t<.5?2*t*t:-1+(4-2*t)*t;}
 function lerp(a,b,t){return a+(b-a)*t;}
 function clamp(t){return Math.max(0,Math.min(1,t));}
@@ -57,86 +53,114 @@ function frame(ts){
   var raw=((ts-t0)%T)/T;
   ctx.fillStyle='#080808'; ctx.fillRect(0,0,W,H);
 
-  // 0-12%:  smooth letter A
-  // 10-16%: cut lines appear ON the letter
-  // 14-34%: letter fragments separate (drawImage slices spread apart)
-  // 32-52%: fragments STRETCH into rectangles (drawImage stretch)
-  // 50-72%: rectangles morph to 3D (crossfade to solid color)
-  // 70-92%: hold
-  // 92-100%: fade
+  // TIMELINE:
+  // 0-12%:   smooth letter A (fillText, one piece)
+  // 10-16%:  cut lines appear on the letter
+  // 14-28%:  letter SPLITS: clipped fillText strips separate (gaps grow)
+  // 26-42%:  strips STRETCH: clip height grows, letter stretches inside
+  // 40-46%:  crossfade stretched letter → solid green bars
+  // 44-64%:  bars morph to 3D heights
+  // 62-90%:  hold final
+  // 90-100%: fade
 
-  var tCuts    = ease(clamp((raw-.10)/.06));  // cut lines appear
-  var tSplit   = ease(clamp((raw-.14)/.20));  // fragments separate
-  var tStretch = ease(clamp((raw-.32)/.20));  // stretch to rectangles
-  var tMorph   = ease(clamp((raw-.50)/.22));  // morph to 3D
-  var tFade    = 1-ease(clamp((raw-.92)/.06));
+  var tCuts     = ease(clamp((raw-.10)/.06));   // cut lines appear
+  var tSplit    = ease(clamp((raw-.14)/.14));    // strips separate
+  var tStretch  = ease(clamp((raw-.26)/.16));    // strips stretch tall
+  var tSolidify = ease(clamp((raw-.40)/.06));    // letter texture → solid bar
+  var tMorph    = ease(clamp((raw-.44)/.20));    // uniform → 3D
+  var tFade     = 1-ease(clamp((raw-.90)/.08));
 
+  // Layout constants
   var letterW=360, letterL=W/2-letterW/2, stripW=letterW/NUM;
   var barW=30, gapMax=4;
   var totBW=NUM*barW+(NUM-1)*gapMax, barsL=W/2-totBW/2;
 
   ctx.globalAlpha=tFade;
 
-  for(var col=0;col<NUM;col++){
-    // Position interpolation
-    var lCX=letterL+(col+.5)*stripW;
-    var bCX=barsL+col*(barW+gapMax)+barW/2;
-    var cx=lerp(lCX,bCX,tSplit);
-    var w=lerp(stripW,barW,tSplit);
+  // --- Phase 1: Full smooth letter (before any cutting) ---
+  if(tCuts<.01){
+    ctx.fillStyle='#33ff33';
+    ctx.font='bold 320px Arial,sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('A',W/2,H/2-10);
+  }
+  else {
+    // --- Phases 2-5: Per-column rendering ---
+    for(var col=0;col<NUM;col++){
+      // Position: letter strip center → bar center
+      var lCX=letterL+(col+.5)*stripW;
+      var bCX=barsL+col*(barW+gapMax)+barW/2;
+      var cx=lerp(lCX,bCX,tSplit);
+      var w=lerp(stripW,barW,tSplit);
 
-    // Height interpolation: letter→uniform rect→3D
-    var lt=lTops[col], lb=lBots[col];
-    var ut=H*.10, ub=H*.90;
-    var mt=lerp(lt,ut,tStretch), mb=lerp(lb,ub,tStretch);
-    var ft=lerp(mt,tgtT[col]*H,tMorph), fb=lerp(mb,tgtB[col]*H,tMorph);
+      // Height: letter extent → full rect → 3D
+      var lt=lTops[col], lb=lBots[col];
+      var ut=H*.08, ub=H*.92;  // full-height rect
+      var clipTop=lerp(lt,ut,tStretch);
+      var clipBot=lerp(lb,ub,tStretch);
 
-    var x0=cx-w/2;
+      // 3D morph
+      var ft=lerp(clipTop,tgtT[col]*H,tMorph);
+      var fb=lerp(clipBot,tgtB[col]*H,tMorph);
 
-    ctx.save();
-    ctx.globalAlpha=tFade;
+      var x0=cx-w/2;
+      var y0=ft, y1=fb, barH=y1-y0;
 
-    // Draw the fragment: ALWAYS use drawImage from the letter canvas
-    // Source: this column's strip of the letter
-    // Dest: stretched to current height
-    var srcX=letterL+col*stripW, srcY=lt, srcW=stripW, srcH=Math.max(1,lb-lt);
-    var dstX=x0, dstY=ft, dstW=w, dstH=Math.max(1,fb-ft);
-
-    if(tMorph<.95){
-      // Letter texture stretched
       ctx.save();
-      ctx.globalAlpha*=Math.max(0,1-tMorph);
-      ctx.drawImage(lc, srcX,srcY,srcW,srcH, dstX,dstY,dstW,dstH);
-      ctx.restore();
-    }
-    if(tMorph>.05){
-      // Solid bar (fades in only during morph phase)
-      var bright=Math.floor(40+190*(dstH/H));
-      bright=Math.max(30,Math.min(230,bright));
-      ctx.save();
-      ctx.globalAlpha*=Math.min(1,tMorph);
-      ctx.fillStyle='rgb(0,'+bright+',0)';
-      ctx.fillRect(dstX,dstY,dstW,dstH);
-      ctx.restore();
-    }
 
-    // Edges
-    if(tSplit>.05){
-      ctx.strokeStyle='rgba(0,180,0,'+(0.1+.2*tStretch)+')';
-      ctx.lineWidth=1;
-      ctx.strokeRect(dstX+.5,dstY+.5,dstW-1,dstH-1);
-    }
-    ctx.restore();
+      if(tSolidify<.95){
+        // Draw CLIPPED smooth letter (the letter texture stretches as clip grows)
+        ctx.save();
+        ctx.globalAlpha=tFade*(1-tSolidify);
+        ctx.beginPath();
+        ctx.rect(x0, y0, w, barH);
+        ctx.clip();
+        // Position the letter so this column's strip appears in the clip
+        var shift=x0+w/2-lCX;
+        // Vertical scale: stretch the letter to fill the growing clip
+        var origH=lb-lt;
+        var scaleY=barH/Math.max(1,origH);
+        ctx.translate(W/2+shift, y0+barH/2);
+        ctx.scale(1, scaleY);
+        ctx.translate(-(W/2+shift), -(lt+origH/2));
+        ctx.fillStyle='#33ff33';
+        ctx.font='bold 320px Arial,sans-serif';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('A',W/2+shift,H/2-10);
+        ctx.restore();
+      }
 
-    // Cut lines on the letter (before fragments separate)
-    if(tCuts>.01&&tSplit<.3){
-      ctx.save();
-      ctx.globalAlpha=.6*(1-tSplit*3)*tFade;
-      ctx.strokeStyle='#88ff88'; ctx.lineWidth=1.5;
-      ctx.beginPath();
-      ctx.moveTo(letterL+col*stripW,lt-10);
-      ctx.lineTo(letterL+col*stripW,lb+10);
-      ctx.stroke();
+      if(tSolidify>.05){
+        // Solid bar (fades in during solidify phase)
+        var bright=Math.floor(lerp(160,40+190*(barH/H),tMorph));
+        bright=Math.max(30,Math.min(230,bright));
+        ctx.save();
+        ctx.globalAlpha=tFade*Math.min(1,tSolidify);
+        ctx.fillStyle='rgb(0,'+bright+',0)';
+        ctx.fillRect(x0,y0,w,barH);
+        ctx.restore();
+      }
+
+      // Edge outlines
+      if(tSplit>.08){
+        ctx.strokeStyle='rgba(0,180,0,'+(0.1+.25*Math.min(1,tStretch))+')';
+        ctx.lineWidth=1;
+        ctx.strokeRect(x0+.5,y0+.5,w-1,barH-1);
+      }
+
       ctx.restore();
+
+      // Cut lines (on the letter, before splitting)
+      if(tCuts>.01&&tSplit<.15){
+        ctx.save();
+        ctx.globalAlpha=.7*(1-tSplit*7)*tFade;
+        ctx.strokeStyle='#88ff88'; ctx.lineWidth=1.5;
+        ctx.beginPath();
+        ctx.moveTo(letterL+col*stripW, lt-15);
+        ctx.lineTo(letterL+col*stripW, lb+15);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
   }
 
@@ -147,20 +171,20 @@ function frame(ts){
   var label='';
   if(raw<.12) label='Standard font glyph — "A"';
   else if(raw<.18) label='Cutting into 16 vertical fragments';
-  else if(raw<.34) label='Fragments separate';
-  else if(raw<.52) label='Each fragment stretches into a rectangle';
-  else if(raw<.72) label='Hinting VM raycasts → SCFS sets bar heights';
-  else if(raw<.92) label='3D rendered by TrueType font hinting bytecode';
+  else if(raw<.30) label='Fragments of the letter separate';
+  else if(raw<.44) label='Each fragment stretches into a rectangle';
+  else if(raw<.64) label='Hinting VM raycasts → SCFS sets bar heights';
+  else if(raw<.90) label='3D rendered by TrueType font hinting bytecode';
   if(label){ctx.fillStyle='#888';ctx.fillText(label,W/2,22);}
 
-  if(raw>.40&&raw<.92){
-    ctx.save();ctx.globalAlpha=clamp((raw-.40)/.06)*clamp((.92-raw)/.04)*.5;
+  if(raw>.34&&raw<.90){
+    ctx.save();ctx.globalAlpha=clamp((raw-.34)/.06)*clamp((.90-raw)/.04)*.5;
     ctx.fillStyle='#555';ctx.font='11px Consolas,monospace';
     ctx.fillText("font-variation-settings: 'MOVX' -62, 'TURN' "+lerp(-1000,0,tMorph).toFixed(0),W/2,H-14);
     ctx.restore();
   }
-  if(raw>.70&&raw<.92){
-    ctx.save();ctx.globalAlpha=clamp((raw-.70)/.04)*.4;
+  if(raw>.64&&raw<.90){
+    ctx.save();ctx.globalAlpha=clamp((raw-.64)/.04)*.4;
     ctx.fillStyle='#444';ctx.font='10px Consolas,monospace';
     ctx.fillText('doom.ttf  •  6,580 bytes  •  13 FDEF  •  795 storage',W/2,H-2);
     ctx.restore();
@@ -168,7 +192,7 @@ function frame(ts){
   ctx.globalAlpha=1;
   requestAnimationFrame(frame);
 }
-document.fonts.ready.then(function(){renderLetter();sample();requestAnimationFrame(frame);});
+document.fonts.ready.then(function(){init();requestAnimationFrame(frame);});
 </script>
 </body>
 </html>
