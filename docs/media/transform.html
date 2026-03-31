@@ -67,7 +67,7 @@ for (var i = 0; i < 16; i++) {
 }
 
 // Animation
-var T = 14000;
+var T = 18000; // longer cycle — more time for letter phase
 var t0 = null;
 function ease(t){return t<.5?2*t*t:-1+(4-2*t)*t;}
 function lerp(a,b,t){return a+(b-a)*t;}
@@ -88,10 +88,11 @@ function frame(ts) {
   // 0.80-0.92: final hold with labels
   // 0.92-1.00: fade out
 
-  var tSplit = ease(clamp((raw - 0.08) / 0.25));  // gap appears
-  var tSolid = ease(clamp((raw - 0.30) / 0.20));  // color unifies
-  var tMorph = ease(clamp((raw - 0.50) / 0.25));  // heights change
-  var alpha = clamp(raw / 0.04); // no fade-out — ends on final 3D view
+  // Slower start: letter visible for 18% of cycle before splitting begins
+  var tSplit = ease(clamp((raw - 0.18) / 0.22));  // gap appears at 18%
+  var tSolid = ease(clamp((raw - 0.38) / 0.18));  // color unifies
+  var tMorph = ease(clamp((raw - 0.54) / 0.22));  // heights change
+  var alpha = clamp(raw / 0.03); // quick fade-in
 
   ctx.globalAlpha = alpha;
 
@@ -148,11 +149,11 @@ function frame(ts) {
   ctx.font = '14px Consolas, Courier New, monospace';
 
   var label = '';
-  if (raw < 0.12) label = 'Standard font glyph — "A"';
-  else if (raw < 0.32) label = 'Glyph contours split into 16 vertical bars';
-  else if (raw < 0.52) label = 'doom.ttf — each bar is an independent contour';
+  if (raw < 0.20) label = 'Standard font glyph — "A"';
+  else if (raw < 0.40) label = 'Glyph contours split into 16 vertical bars';
+  else if (raw < 0.56) label = 'doom.ttf — each bar is an independent contour';
   else if (raw < 0.78) label = 'Hinting VM raycasts → SCFS stretches each bar';
-  else if (raw < 0.92) label = '3D rendered by TrueType font hinting bytecode';
+  else if (raw < 0.95) label = '3D rendered by TrueType font hinting bytecode';
 
   if (label) {
     ctx.fillStyle = '#888';
@@ -160,8 +161,8 @@ function frame(ts) {
   }
 
   // Axis display during morph
-  if (raw > 0.35 && raw < 0.90) {
-    var aa = clamp((raw-0.35)/0.08) * clamp((0.90-raw)/0.05);
+  if (raw > 0.40 && raw < 0.95) {
+    var aa = clamp((raw-0.40)/0.08) * clamp((0.95-raw)/0.05);
     ctx.save();
     ctx.globalAlpha = aa * 0.5;
     ctx.fillStyle = '#555';
@@ -172,9 +173,9 @@ function frame(ts) {
   }
 
   // Stats
-  if (raw > 0.72 && raw < 0.92) {
+  if (raw > 0.76 && raw < 0.95) {
     ctx.save();
-    ctx.globalAlpha = clamp((raw-0.72)/0.04) * 0.4;
+    ctx.globalAlpha = clamp((raw-0.76)/0.04) * 0.4;
     ctx.fillStyle = '#444';
     ctx.font = '10px Consolas, Courier New, monospace';
     ctx.fillText('doom.ttf  •  6,580 bytes  •  13 FDEF  •  795 storage', W/2, H - 2);
