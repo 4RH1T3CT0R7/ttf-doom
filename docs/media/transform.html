@@ -4,14 +4,7 @@
 <meta charset="UTF-8">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: #080808;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    overflow: hidden;
-  }
+  body { background: #080808; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
   canvas { display: block; }
 </style>
 </head>
@@ -22,268 +15,211 @@ var C = document.getElementById('c');
 var ctx = C.getContext('2d');
 var W = 900, H = 500;
 
-// --- Offscreen: render letter A as texture ---
-var letterCanvas = document.createElement('canvas');
-letterCanvas.width = 512; letterCanvas.height = 512;
-var lctx = letterCanvas.getContext('2d');
-lctx.fillStyle = '#080808';
-lctx.fillRect(0, 0, 512, 512);
-lctx.fillStyle = '#33ff33';
-lctx.font = 'bold 420px Arial';
-lctx.textAlign = 'center';
-lctx.textBaseline = 'middle';
-lctx.fillText('A', 256, 240);
+// Render letter A to offscreen canvas
+var lc = document.createElement('canvas');
+lc.width = 512; lc.height = 512;
+var lx = lc.getContext('2d');
+lx.fillStyle = '#080808';
+lx.fillRect(0, 0, 512, 512);
+lx.fillStyle = '#33ff33';
+lx.font = 'bold 400px Arial';
+lx.textAlign = 'center';
+lx.textBaseline = 'middle';
+lx.fillText('A', 256, 235);
 
-// Sample: for each of 16 columns, find top/bottom of letter pixels
-var slices = [];
-var sliceW = 512 / 16;
+// For each of 16 columns, find letter extents
+var colData = [];
+var sw = 512 / 16;
 for (var col = 0; col < 16; col++) {
-  var sx = Math.floor(col * sliceW);
-  var data = lctx.getImageData(sx, 0, Math.ceil(sliceW), 512).data;
-  var top = 512, bot = 0;
+  var sx = Math.floor(col * sw);
+  var img = lx.getImageData(sx, 0, Math.ceil(sw), 512);
+  var top = 512, bot = 0, hasPixels = false;
   for (var y = 0; y < 512; y++) {
-    for (var x = 0; x < Math.ceil(sliceW); x++) {
-      var idx = (y * Math.ceil(sliceW) + x) * 4;
-      if (data[idx + 1] > 50) { // green channel
+    for (var x = 0; x < Math.ceil(sw); x++) {
+      if (img.data[(y * Math.ceil(sw) + x) * 4 + 1] > 40) {
         if (y < top) top = y;
         if (y > bot) bot = y;
+        hasPixels = true;
       }
     }
   }
-  slices.push({ top: top / 512, bot: bot / 512, sx: sx, sw: Math.ceil(sliceW) });
+  if (!hasPixels) { top = 200; bot = 300; }
+  colData.push({ top: top / 512, bot: bot / 512, sx: sx, sw: Math.ceil(sw) });
 }
 
-// --- Raycaster: target 3D heights ---
-var MAP = [
-  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-  1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,
-  1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
-  1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
-  1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,
-  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-  1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,
-  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-  1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
-  1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,
-  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-  1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
-];
-function isWall(x, y) {
-  var gx = Math.floor(x / 64), gy = Math.floor(y / 64);
-  if (gx < 0 || gx >= 16 || gy < 0 || gy >= 16) return true;
-  return MAP[gy * 16 + gx] === 1;
-}
-function raycast(col) {
-  var ra = 0 + col * 3 - 24;
-  var dx = Math.cos(ra / 256 * Math.PI * 2) * 64;
-  var dy = Math.sin(ra / 256 * Math.PI * 2) * 64;
-  var px = 480, py = 480;
-  for (var s = 0; s < 14; s++) {
-    px += dx; py += dy;
-    if (isWall(px, py)) return s + 1;
-  }
-  return 14;
-}
-
-// Target bar normalized heights (0..1)
+// Raycaster targets
+var MAP = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1];
+function isWall(x,y){var gx=Math.floor(x/64),gy=Math.floor(y/64);if(gx<0||gx>=16||gy<0||gy>=16)return true;return MAP[gy*16+gx]===1;}
 var targets = [];
 for (var i = 0; i < 16; i++) {
-  var d = raycast(i);
-  targets.push(Math.min(0.92, 900 / d / 1000));
+  var ra = i * 3 - 24, dx = Math.cos(ra/256*Math.PI*2)*64, dy = Math.sin(ra/256*Math.PI*2)*64;
+  var px=480,py=480,d=14;
+  for(var s=0;s<14;s++){px+=dx;py+=dy;if(isWall(px,py)){d=s+1;break;}}
+  targets.push(Math.min(0.92, 900/d/1000));
 }
 
-// --- Animation ---
-var TOTAL = 12000; // 12 seconds per cycle
-var startTime = null;
+// Animation: one continuous 15s cycle
+var T = 15000;
+var t0 = null;
 
-function ease(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; }
-function lerp(a, b, t) { return a + (b - a) * t; }
-function clamp01(t) { return Math.max(0, Math.min(1, t)); }
+function ease(t){return t<.5?2*t*t:-1+(4-2*t)*t;}
+function lerp(a,b,t){return a+(b-a)*t;}
+function clamp(t){return Math.max(0,Math.min(1,t));}
 
-// Map global time 0..1 to per-effect progress
-// 0.00-0.15: pure letter A
-// 0.15-0.40: letter splits into slices, slices separate
-// 0.40-0.55: slices solidify into uniform bars
-// 0.55-0.80: bars morph to 3D raycasted heights
-// 0.80-0.92: hold final + labels
-// 0.92-1.00: fade out
+function frame(ts) {
+  if(!t0) t0=ts;
+  var raw = ((ts-t0)%T)/T;
 
-function draw(timestamp) {
-  if (!startTime) startTime = timestamp;
-  var raw = ((timestamp - startTime) % TOTAL) / TOTAL;
+  ctx.fillStyle='#080808';
+  ctx.fillRect(0,0,W,H);
 
-  ctx.clearRect(0, 0, W, H);
+  var cx=W/2, cy=H/2;
+  var bw=30, gp=3;
+  var tw=16*(bw+gp)-gp;
+  var bx=cx-tw/2;
 
-  var cx = W / 2, cy = H / 2;
-  var barW = 30, gap = 3;
-  var totalBarW = 16 * (barW + gap) - gap;
-  var baseX = cx - totalBarW / 2;
+  // Global timeline phases (overlapping for smoothness)
+  // 0.00-0.12: letter A fully visible
+  // 0.08-0.30: scan lines appear, letter starts splitting
+  // 0.25-0.50: slices separate, letter fragments stretch into bars
+  // 0.45-0.70: bars individually stretch/shrink to 3D heights
+  // 0.65-0.88: final 3D view holds
+  // 0.85-1.00: fade out
 
-  // Progress values for each effect
-  var splitT = clamp01((raw - 0.12) / 0.25);   // 0.12-0.37
-  var solidT = clamp01((raw - 0.35) / 0.18);   // 0.35-0.53
-  var morphT = clamp01((raw - 0.50) / 0.28);   // 0.50-0.78
-  var fadeIn = clamp01(raw / 0.05);
-  var fadeOut = clamp01((raw - 0.90) / 0.08);
-  var eSplit = ease(splitT);
-  var eSolid = ease(solidT);
-  var eMorph = ease(morphT);
+  var splitProgress = ease(clamp((raw - 0.08) / 0.22));  // letter → slices
+  var barifyProgress = ease(clamp((raw - 0.28) / 0.20)); // slices → solid bars
+  var morphProgress = ease(clamp((raw - 0.48) / 0.22));  // bars → 3D heights
+  var globalFade = clamp(raw/0.04) * (1 - clamp((raw-0.87)/0.10));
 
-  ctx.globalAlpha = fadeIn * (1 - fadeOut);
+  ctx.globalAlpha = globalFade;
 
-  // --- Draw 16 columns ---
   for (var col = 0; col < 16; col++) {
-    var s = slices[col];
-    var tx = baseX + col * (barW + gap);
+    var cd = colData[col];
 
-    // Letter slice original extents (in canvas coords)
-    var letterTop = lerp(s.top, 0.25, eSolid);  // letter pixel top → uniform
-    var letterBot = lerp(s.bot, 0.75, eSolid);   // letter pixel bottom → uniform
+    // --- Position: start centered as letter, end as evenly spaced bars ---
+    // Letter position: based on original glyph placement
+    var letterCenterX = cx - 210 + col * (420/16) + (420/32);
+    var barCenterX = bx + col * (bw + gp) + bw/2;
+    var drawCenterX = lerp(letterCenterX, barCenterX, splitProgress);
+    var drawW = lerp(420/16, bw, splitProgress);
 
-    // Morph to 3D target heights
-    var targetH = targets[col];
-    var finalTop = 0.5 - targetH / 2;
-    var finalBot = 0.5 + targetH / 2;
-    var drawTop = lerp(letterTop, finalTop, eMorph);
-    var drawBot = lerp(letterBot, finalBot, eMorph);
+    // --- Height: letter shape → uniform → 3D raycasted ---
+    // Letter top/bottom (from pixel sampling)
+    var lTop = cd.top;
+    var lBot = cd.bot;
 
-    var y0 = drawTop * H;
-    var y1 = drawBot * H;
+    // Uniform bar: all same height centered
+    var uniTop = 0.22;
+    var uniBot = 0.78;
+
+    // 3D target
+    var tgtH = targets[col];
+    var tgtTop = 0.5 - tgtH/2;
+    var tgtBot = 0.5 + tgtH/2;
+
+    // Blend: letter → uniform (during barify), then uniform → 3D (during morph)
+    var midTop = lerp(lTop, uniTop, barifyProgress);
+    var midBot = lerp(lBot, uniBot, barifyProgress);
+    var finalTop = lerp(midTop, tgtTop, morphProgress);
+    var finalBot = lerp(midBot, tgtBot, morphProgress);
+
+    var y0 = finalTop * H;
+    var y1 = finalBot * H;
     var barH = y1 - y0;
 
-    // Split: columns spread apart from center
-    var spreadOffset = eSplit * col * gap * 0.5 - eSplit * 8 * gap * 0.5;
-    var drawX = tx + spreadOffset * (1 - eSolid); // spread reduces as bars solidify
+    // --- Visual: letter texture → solid green ---
+    var solidness = barifyProgress;
 
-    // Color: blend from letter green to distance-shaded green
-    var brightness = Math.floor(lerp(130, 40 + 180 * (barH / H), eMorph));
-    brightness = Math.max(30, Math.min(220, brightness));
-
-    // Draw the bar
-    if (eSolid < 1) {
-      // Still partially showing letter texture
-      var letterAlpha = 1 - eSolid;
-      var barAlpha = eSolid;
-
-      // Letter texture slice
-      if (letterAlpha > 0.01) {
-        ctx.save();
-        ctx.globalAlpha *= letterAlpha;
-        ctx.beginPath();
-        ctx.rect(drawX, 0, barW, H);
-        ctx.clip();
-        // Scale letter canvas to match display
-        var scaleX = (barW * 16 + gap * 15) / 512 * (1 + eSplit * 0.2);
-        var scaleY = H / 512;
-        var offsetX = drawX - s.sx * scaleX + (barW - s.sw * scaleX) / 2;
-        ctx.drawImage(letterCanvas, offsetX, 0, 512 * scaleX, 512 * scaleY);
-        ctx.restore();
-      }
-
-      // Solid bar overlay (fading in)
-      if (barAlpha > 0.01) {
-        ctx.save();
-        ctx.globalAlpha *= barAlpha;
-        ctx.fillStyle = 'rgb(0,' + brightness + ',0)';
-        ctx.fillRect(drawX, y0, barW, barH);
-        ctx.restore();
-      }
-    } else {
-      // Fully solid bar
-      ctx.fillStyle = 'rgb(0,' + brightness + ',0)';
-      ctx.fillRect(drawX, y0, barW, barH);
-    }
-
-    // Subtle edge highlight
-    if (eSolid > 0.3) {
+    // Draw letter texture (fading out)
+    if (solidness < 0.98) {
       ctx.save();
-      ctx.globalAlpha *= Math.min(1, (eSolid - 0.3) * 2);
-      ctx.strokeStyle = 'rgba(0,' + Math.min(255, brightness + 40) + ',0,0.4)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(drawX + 0.5, y0 + 0.5, barW - 1, barH - 1);
+      ctx.globalAlpha *= (1 - solidness) * globalFade;
+      ctx.beginPath();
+      ctx.rect(drawCenterX - drawW/2, 0, drawW, H);
+      ctx.clip();
+      // Map letter canvas onto this column
+      var scale = H / 512;
+      var lxOff = drawCenterX - drawW/2 - cd.sx * scale * (1 + splitProgress*0.1);
+      ctx.drawImage(lc, lxOff, 0, 512*scale, 512*scale);
       ctx.restore();
     }
 
-    // Column scan line effect during split phase
-    if (eSplit > 0.01 && eSplit < 0.95) {
+    // Draw solid bar (fading in)
+    if (solidness > 0.02) {
       ctx.save();
-      ctx.globalAlpha *= 0.3 * (1 - Math.abs(eSplit - 0.5) * 2);
-      ctx.strokeStyle = '#33ff33';
+      ctx.globalAlpha *= solidness * globalFade;
+      var bright = Math.floor(lerp(100, 40 + 190*(barH/H), morphProgress));
+      bright = Math.max(25, Math.min(230, bright));
+      ctx.fillStyle = 'rgb(0,'+bright+',0)';
+      ctx.fillRect(drawCenterX - drawW/2, y0, drawW, barH);
+
+      // Edge glow
+      ctx.strokeStyle = 'rgba(0,'+Math.min(255,bright+50)+',0,0.35)';
       ctx.lineWidth = 1;
+      ctx.strokeRect(drawCenterX - drawW/2 + .5, y0 + .5, drawW - 1, barH - 1);
+      ctx.restore();
+    }
+
+    // Scan lines during splitting phase
+    if (splitProgress > 0.01 && splitProgress < 0.8) {
+      ctx.save();
+      ctx.globalAlpha *= 0.4 * (1 - Math.abs(splitProgress - 0.4));
+      ctx.strokeStyle = '#33ff33';
+      ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.moveTo(drawX, 0);
-      ctx.lineTo(drawX, H);
+      ctx.moveTo(drawCenterX - drawW/2, y0);
+      ctx.lineTo(drawCenterX - drawW/2, y1);
       ctx.stroke();
       ctx.restore();
     }
   }
 
-  ctx.globalAlpha = fadeIn * (1 - fadeOut);
-
   // --- Labels ---
+  ctx.globalAlpha = globalFade;
   ctx.textAlign = 'center';
+  ctx.font = '14px Consolas, Courier New, monospace';
 
-  // Top label: morphs between descriptions
-  var label = '';
-  var labelAlpha = 0.8;
-  if (raw < 0.15) {
-    label = 'Standard font glyph';
-  } else if (raw < 0.37) {
-    label = 'Splitting into 16 vertical contours';
-  } else if (raw < 0.53) {
-    label = 'doom.ttf — 16 bar contours, 64 control points';
-  } else if (raw < 0.80) {
-    label = 'GETVARIATION[] → raycast → SCFS[] repositions points';
-  } else if (raw < 0.92) {
-    label = '3D raycasting in TrueType font hinting bytecode';
-    labelAlpha = 1;
-  }
+  var label = '', labelA = 0.7;
+  if (raw < 0.12) label = 'Standard font glyph — "A"';
+  else if (raw < 0.30) label = 'Splitting glyph into 16 vertical contours';
+  else if (raw < 0.50) label = 'doom.ttf — contours become independent bars';
+  else if (raw < 0.72) label = 'Hinting VM raycasts → SCFS repositions each bar';
+  else if (raw < 0.88) { label = '3D rendered by TrueType font hinting bytecode'; labelA = 0.9; }
 
   if (label) {
     ctx.save();
-    ctx.globalAlpha *= labelAlpha;
+    ctx.globalAlpha *= labelA;
     ctx.fillStyle = '#999';
-    ctx.font = '15px Consolas, Courier New, monospace';
     ctx.fillText(label, cx, 28);
     ctx.restore();
   }
 
-  // Bottom label: font-variation-settings (appears during morph)
-  if (raw > 0.35 && raw < 0.92) {
-    var axisAlpha = clamp01((raw - 0.35) / 0.1) * clamp01((0.92 - raw) / 0.05);
+  // Bottom axis display during morph
+  if (raw > 0.30 && raw < 0.88) {
+    var ba = clamp((raw-0.30)/0.08) * clamp((0.88-raw)/0.05);
     ctx.save();
-    ctx.globalAlpha *= axisAlpha * 0.6;
-    ctx.fillStyle = '#666';
-    ctx.font = '12px Consolas, Courier New, monospace';
-    if (raw < 0.55) {
-      ctx.fillText("font-variation-settings: 'MOVX' -62, 'MOVY' -62, 'TURN' -1000", cx, H - 18);
-    } else {
-      var turnV = lerp(-1000, 0, eMorph).toFixed(0);
-      ctx.fillText("font-variation-settings: 'MOVX' -62, 'TURN' " + turnV + "  →  hinting VM executes", cx, H - 18);
-    }
+    ctx.globalAlpha *= ba * 0.5;
+    ctx.fillStyle = '#555';
+    ctx.font = '11px Consolas, Courier New, monospace';
+    var tv = lerp(-1000, 0, morphProgress).toFixed(0);
+    ctx.fillText("font-variation-settings: 'MOVX' -62, 'TURN' "+tv+"  →  GETVARIATION[] → raycast()", cx, H-14);
     ctx.restore();
   }
 
-  // Final stats line
-  if (raw > 0.78 && raw < 0.92) {
-    var statsA = clamp01((raw - 0.78) / 0.06);
+  // Stats at end
+  if (raw > 0.70 && raw < 0.88) {
     ctx.save();
-    ctx.globalAlpha *= statsA * 0.5;
-    ctx.fillStyle = '#555';
-    ctx.font = '11px Consolas, Courier New, monospace';
-    ctx.fillText('doom.ttf  •  6,580 bytes  •  13 FDEF functions  •  795 storage slots', cx, H - 4);
+    ctx.globalAlpha *= clamp((raw-0.70)/0.05) * 0.4;
+    ctx.fillStyle = '#444';
+    ctx.font = '10px Consolas, Courier New, monospace';
+    ctx.fillText('doom.ttf  •  6,580 bytes  •  13 FDEF functions  •  795 storage slots', cx, H-2);
     ctx.restore();
   }
 
   ctx.globalAlpha = 1;
-  requestAnimationFrame(draw);
+  requestAnimationFrame(frame);
 }
-
-requestAnimationFrame(draw);
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
