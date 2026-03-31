@@ -1,0 +1,786 @@
+/**
+ * TTDoom browser host -- game state + input + rendering via font hinting.
+ *
+ * Architecture: JS = CPU (game logic, state, collision), Font = GPU (raycasting).
+ * JS passes player position and angle to the font via variation axes.
+ * The font's hinting VM raycasts and repositions glyph bars.
+ *
+ * Axis encoding (fvar range -1000..1000, GETVARIATION normalizes to F2Dot14):
+ *   MOVX: player_x mapped to -1000..1000 (world range 0..1024)
+ *   MOVY: player_y mapped to -1000..1000
+ *   TURN: player_angle mapped to -1000..1000 (angle range 0..256)
+ *   FIRE: unused for now
+ *   ACTN: unused for now
+ */
+(function () {
+    "use strict";
+
+    var el = document.getElementById("game");
+    var statusEl = document.getElementById("status");
+
+    // --- Game state (managed entirely in JS) ---
+    var px = 480;       // world x (0..1024, cell_size=64, 16x16 grid)
+    var py = 480;       // world y (center of map = cell 7,7)
+    var angle = 0;      // 0..255 (256 = full circle)
+
+    // Movement constants
+    var MOVE_SPEED = 3;
+    var TURN_SPEED = 1;
+    var CELL_SIZE = 64;
+
+    // Combat / HUD state
+    var health = 100;
+    var ammo = 50;
+    var score = 0;
+    var muzzleFlashTimer = 0;
+    var lastShotTime = 0;
+    var SHOT_COOLDOWN = 0.3; // seconds
+    var dead = false;
+
+    // --- Enemies ---
+    var ENEMY_SPEED = 30;        // world units per second
+    var ENEMY_ATTACK_RANGE = 25; // within this distance enemies deal damage
+    var ENEMY_ATTACK_DPS = 10;   // damage per second on contact
+    var ENEMY_DAMAGE = 35;       // damage per shot
+
+    // Initial enemy spawn data (kept so we can reset on restart)
+    // Spawn positions verified: all in open cells (map value = 0)
+    var ENEMY_SPAWNS = [
+        { x: 450, y: 200, hp: 100, type: 1 },  // cell(7,3) — open
+        { x: 300, y: 800, hp: 100, type: 1 },   // cell(4,12) — open
+        { x: 800, y: 480, hp: 100, type: 2 },   // cell(12,7) — open
+        { x: 320, y: 480, hp: 150, type: 2 }    // cell(5,7) — open
+    ];
+
+    var enemies = [];
+
+    /** Check if there is a clear line of sight from (x0,y0) to (x1,y1) */
+    function hasLineOfSight(x0, y0, x1, y1) {
+        var ddx = x1 - x0;
+        var ddy = y1 - y0;
+        var dist = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (dist < 1) return true;
+        var steps = Math.ceil(dist / 4); // check every 4 units for precision
+        for (var i = 1; i < steps; i++) {
+            var t = i / steps;
+            var cx = x0 + ddx * t;
+            var cy = y0 + ddy * t;
+            if (isWall(cx, cy)) return false;
+        }
+        return true;
+    }
+
+    function spawnEnemies() {
+        enemies = ENEMY_SPAWNS.map(function (s) {
+            return { x: s.x, y: s.y, hp: s.hp, alive: true, type: s.type, hurtTimer: 0 };
+        });
+    }
+    spawnEnemies();
+
+    // 16x16 map -- must match game/build.py LEVEL_1
+    var MAP = [
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,
+        1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+        1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+        1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,
+        1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+        1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,
+        1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+    ];
+
+    function isWall(wx, wy) {
+        var gx = Math.floor(wx / CELL_SIZE);
+        var gy = Math.floor(wy / CELL_SIZE);
+        if (gx < 0 || gx >= 16 || gy < 0 || gy >= 16) return true;
+        return MAP[gy * 16 + gx] === 1;
+    }
+
+    // Key state
+    var pressed = {};
+    document.addEventListener("keydown", function (e) {
+        pressed[e.code] = true;
+        if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) !== -1)
+            e.preventDefault();
+    });
+    document.addEventListener("keyup", function (e) { pressed[e.code] = false; });
+
+    // --- Sound effects (Web Audio API, procedural) ---
+    var audioCtx = null;
+    var lastFootstepTime = 0;
+    var FOOTSTEP_INTERVAL = 0.3; // seconds between footstep clicks
+
+    function initAudio() {
+        if (audioCtx) return;
+        try {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+            // Web Audio not supported -- sounds disabled silently.
+        }
+    }
+
+    function playFootstep(now) {
+        if (!audioCtx) return;
+        if (now - lastFootstepTime < FOOTSTEP_INTERVAL) return;
+        lastFootstepTime = now;
+
+        // Short percussive click
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.type = "square";
+        osc.frequency.value = 80;
+        gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.06);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + 0.06);
+    }
+
+    function playTurnSound() {
+        if (!audioCtx) return;
+
+        // Subtle filtered noise whoosh
+        var bufferSize = audioCtx.sampleRate * 0.05; // 50ms
+        var buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        var data = buffer.getChannelData(0);
+        for (var i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * 0.015;
+        }
+        var source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+
+        var filter = audioCtx.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.value = 2000;
+        filter.Q.value = 2;
+
+        var gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+        source.start(audioCtx.currentTime);
+    }
+
+    function playShootSound() {
+        if (!audioCtx) return;
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.15);
+    }
+
+    function playEnemyDeathSound() {
+        if (!audioCtx) return;
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.4);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.4);
+    }
+
+    function playHurtSound() {
+        if (!audioCtx) return;
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.2);
+    }
+
+    // Initialise audio on first user interaction (browser autoplay policy)
+    document.addEventListener("keydown", function handler() {
+        initAudio();
+        document.removeEventListener("keydown", handler);
+    }, { once: true });
+
+    // --- Enemy AI ---
+    function updateEnemies(dt) {
+        if (dead) return;
+        enemies.forEach(function (e) {
+            if (!e.alive) return;
+
+            // Tick hurt flash timer
+            if (e.hurtTimer > 0) e.hurtTimer -= dt;
+
+            var dx = px - e.x;
+            var dy = py - e.y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < ENEMY_ATTACK_RANGE) {
+                // Attack player
+                health -= ENEMY_ATTACK_DPS * dt;
+                if (health <= 0) {
+                    health = 0;
+                    dead = true;
+                }
+                return;
+            }
+
+            // Simple chase -- move toward player if not too far
+            if (dist < 500 && dist > 0) {
+                var moveX = dx / dist * ENEMY_SPEED * dt;
+                var moveY = dy / dist * ENEMY_SPEED * dt;
+
+                // Collision check against walls for enemies too
+                var nx = e.x + moveX;
+                var ny = e.y + moveY;
+                if (!isWall(nx, e.y)) e.x = nx;
+                if (!isWall(e.x, ny)) e.y = ny;
+            }
+        });
+    }
+
+    // --- Shooting (hitscan) ---
+    function shoot(now) {
+        if (dead) return;
+        if (ammo <= 0) return;
+        if (now - lastShotTime < SHOT_COOLDOWN) return;
+        lastShotTime = now;
+        ammo--;
+
+        playShootSound();
+        muzzleFlashTimer = 0.1;
+
+        // Hitscan: find closest enemy near crosshair
+        var playerRad = angle / 256 * Math.PI * 2;
+        var bestDist = Infinity;
+        var bestEnemy = null;
+
+        enemies.forEach(function (e) {
+            if (!e.alive) return;
+            var dx = e.x - px;
+            var dy = e.y - py;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 1) return;
+
+            var enemyRad = Math.atan2(dy, dx);
+            var relAngle = enemyRad - playerRad;
+
+            // Normalize to -PI..PI
+            while (relAngle > Math.PI) relAngle -= Math.PI * 2;
+            while (relAngle < -Math.PI) relAngle += Math.PI * 2;
+
+            // Hit tolerance: ~5.7 degrees -- generous enough for fun
+            if (Math.abs(relAngle) < 0.1 && dist < bestDist) {
+                bestDist = dist;
+                bestEnemy = e;
+            }
+        });
+
+        if (bestEnemy) {
+            bestEnemy.hp -= ENEMY_DAMAGE;
+            bestEnemy.hurtTimer = 0.15;
+            if (bestEnemy.hp <= 0) {
+                bestEnemy.alive = false;
+                score += 100;
+                playEnemyDeathSound();
+            } else {
+                playHurtSound();
+            }
+        }
+    }
+
+    // --- Restart game ---
+    function restartGame() {
+        px = 480;
+        py = 480;
+        angle = 0;
+        health = 100;
+        ammo = 50;
+        score = 0;
+        muzzleFlashTimer = 0;
+        lastShotTime = 0;
+        dead = false;
+        spawnEnemies();
+    }
+
+    // --- Overlay rendering ---
+
+    /** Render all alive enemies onto the overlay canvas */
+    function renderEnemies(ctx, w, h) {
+        var playerRad = angle / 256 * Math.PI * 2;
+        var fovHalfRad = 24 / 256 * Math.PI * 2; // ~67 degree FOV, half-angle
+
+        // Collect visible enemies with their distance for depth sorting
+        var visible = [];
+
+        enemies.forEach(function (e) {
+            if (!e.alive) return;
+
+            var dx = e.x - px;
+            var dy = e.y - py;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 1) return;
+
+            var enemyRad = Math.atan2(dy, dx);
+            var relAngle = enemyRad - playerRad;
+
+            // Normalize to -PI..PI
+            while (relAngle > Math.PI) relAngle -= Math.PI * 2;
+            while (relAngle < -Math.PI) relAngle += Math.PI * 2;
+
+            // FOV check
+            if (Math.abs(relAngle) > fovHalfRad) return;
+
+            // Line-of-sight check: don't show enemies behind walls
+            if (!hasLineOfSight(px, py, e.x, e.y)) return;
+
+            visible.push({ e: e, dist: dist, relAngle: relAngle });
+        });
+
+        // Sort far to near so closer enemies paint on top
+        visible.sort(function (a, b) { return b.dist - a.dist; });
+
+        visible.forEach(function (v) {
+            var e = v.e;
+            var dist = v.dist;
+            var relAngle = v.relAngle;
+
+            // Screen X: map relative angle to canvas width
+            var screenX = (relAngle / fovHalfRad * 0.5 + 0.5) * w;
+
+            // Size based on distance (closer = bigger)
+            var size = Math.min(200, 3000 / dist);
+            var screenY = h * 0.5; // vertically centered
+
+            // Body color -- flash white when hurt
+            var bodyColor;
+            if (e.hurtTimer > 0) {
+                bodyColor = "#fff";
+            } else {
+                bodyColor = e.type === 1 ? "#c00" : "#d60";
+            }
+
+            // Shadow / outline for visibility against green walls
+            ctx.fillStyle = "rgba(0,0,0,0.4)";
+            ctx.fillRect(screenX - size * 0.5 - 2, screenY - size - 2, size + 4, size * 2 + 4);
+
+            // Body
+            ctx.fillStyle = bodyColor;
+            ctx.fillRect(screenX - size * 0.5, screenY - size, size, size * 2);
+
+            // Horns (type 2 is tougher, has horns)
+            if (e.type === 2) {
+                ctx.fillStyle = e.hurtTimer > 0 ? "#fff" : "#a40";
+                var hornW = size * 0.15;
+                var hornH = size * 0.5;
+                ctx.fillRect(screenX - size * 0.4, screenY - size - hornH, hornW, hornH);
+                ctx.fillRect(screenX + size * 0.25, screenY - size - hornH, hornW, hornH);
+            }
+
+            // Eyes
+            ctx.fillStyle = "#ff0";
+            var eyeSize = Math.max(2, size * 0.15);
+            ctx.fillRect(screenX - size * 0.2, screenY - size * 0.5, eyeSize, eyeSize);
+            ctx.fillRect(screenX + size * 0.1, screenY - size * 0.5, eyeSize, eyeSize);
+
+            // Mouth
+            ctx.fillStyle = "#000";
+            var mouthW = size * 0.3;
+            var mouthH = Math.max(1, size * 0.08);
+            ctx.fillRect(screenX - mouthW * 0.5, screenY - size * 0.1, mouthW, mouthH);
+
+            // Health bar above enemy
+            if (e.hp < (e.type === 2 ? 150 : 100)) {
+                var barW = size * 0.8;
+                var barH = Math.max(2, size * 0.08);
+                var barX = screenX - barW * 0.5;
+                var barY = screenY - size - (e.type === 2 ? size * 0.5 + 6 : 6);
+                var maxHp = e.type === 2 ? 150 : 100;
+                var hpFrac = Math.max(0, e.hp / maxHp);
+
+                ctx.fillStyle = "#300";
+                ctx.fillRect(barX, barY, barW, barH);
+                ctx.fillStyle = hpFrac > 0.3 ? "#0f0" : "#f00";
+                ctx.fillRect(barX, barY, barW * hpFrac, barH);
+            }
+        });
+    }
+
+    /** Render the weapon at the bottom center of the overlay */
+    function renderWeapon(ctx, w, h) {
+        var gunW = w * 0.12;
+        var gunH = h * 0.22;
+        var gunX = w * 0.5 - gunW * 0.5;
+        var gunY = h - gunH;
+
+        // Weapon bob when muzzle flash active (recoil)
+        var recoilY = 0;
+        if (muzzleFlashTimer > 0) {
+            recoilY = -8 * (muzzleFlashTimer / 0.1);
+        }
+
+        // Handle / grip
+        ctx.fillStyle = "#555";
+        ctx.fillRect(gunX + gunW * 0.3, gunY + gunH * 0.5 + recoilY, gunW * 0.4, gunH * 0.5);
+
+        // Gun body
+        ctx.fillStyle = "#888";
+        ctx.fillRect(gunX, gunY + recoilY, gunW, gunH * 0.55);
+
+        // Barrel
+        ctx.fillStyle = "#666";
+        var barrelW = gunW * 0.28;
+        var barrelH = gunH * 0.3;
+        ctx.fillRect(gunX + gunW * 0.5 - barrelW * 0.5, gunY - barrelH + recoilY, barrelW, barrelH);
+
+        // Barrel tip highlight
+        ctx.fillStyle = "#444";
+        ctx.fillRect(gunX + gunW * 0.5 - barrelW * 0.5, gunY - barrelH + recoilY, barrelW, 3);
+
+        // Muzzle flash
+        if (muzzleFlashTimer > 0) {
+            var flashSize = gunW * 0.4;
+            var flashX = w * 0.5;
+            var flashY = gunY - barrelH + recoilY;
+
+            // Outer glow
+            ctx.fillStyle = "rgba(255, 200, 0, 0.6)";
+            ctx.beginPath();
+            ctx.arc(flashX, flashY, flashSize * 1.2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Inner bright flash
+            ctx.fillStyle = "#fff";
+            ctx.beginPath();
+            ctx.arc(flashX, flashY, flashSize * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Yellow core
+            ctx.fillStyle = "#ff0";
+            ctx.beginPath();
+            ctx.arc(flashX, flashY, flashSize * 0.8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    /** Render the in-game HUD (health, ammo, score) */
+    function renderHUD(ctx, w, h) {
+        var barH = 18;
+        var barY = h - barH - 8;
+        var barW = 140;
+
+        // Background strip for readability
+        ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+        ctx.fillRect(0, barY - 4, w, barH + 12);
+
+        // Health bar background
+        ctx.fillStyle = "#300";
+        ctx.fillRect(10, barY, barW, barH);
+        // Health bar fill
+        var hpFrac = Math.max(0, health) / 100;
+        ctx.fillStyle = health > 30 ? "#0c0" : "#f00";
+        ctx.fillRect(10, barY, barW * hpFrac, barH);
+        // Health bar border
+        ctx.strokeStyle = "#666";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(10, barY, barW, barH);
+
+        // Text
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 12px monospace";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText("HP: " + Math.floor(Math.max(0, health)), 15, barY + barH * 0.5);
+
+        // Ammo
+        ctx.fillStyle = ammo > 10 ? "#ff0" : "#f44";
+        ctx.textAlign = "center";
+        ctx.fillText("AMMO: " + ammo, w * 0.5, barY + barH * 0.5);
+
+        // Score
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "right";
+        ctx.fillText("SCORE: " + score, w - 10, barY + barH * 0.5);
+
+        // Reset text align
+        ctx.textAlign = "left";
+    }
+
+    /** Render the death screen overlay */
+    function renderDeathScreen(ctx, w, h) {
+        // Red tint
+        ctx.fillStyle = "rgba(180, 0, 0, 0.55)";
+        ctx.fillRect(0, 0, w, h);
+
+        // "YOU DIED" text
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 48px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("YOU DIED", w * 0.5, h * 0.45);
+
+        // Score
+        ctx.font = "24px monospace";
+        ctx.fillText("SCORE: " + score, w * 0.5, h * 0.55);
+
+        // Restart instruction
+        ctx.font = "18px monospace";
+        ctx.fillStyle = "#ccc";
+        ctx.fillText("Press R to restart", w * 0.5, h * 0.65);
+
+        // Reset
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+    }
+
+    // --- Minimap ---
+    function drawMinimap() {
+        var c = document.getElementById("minimap");
+        if (!c) return;
+        var ctx = c.getContext("2d");
+        var size = 150;
+        var cell = size / 16;
+
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, size, size);
+
+        // Draw walls
+        ctx.fillStyle = "#333";
+        for (var y = 0; y < 16; y++) {
+            for (var x = 0; x < 16; x++) {
+                if (MAP[y * 16 + x] === 1) {
+                    ctx.fillRect(x * cell, y * cell, cell + 0.5, cell + 0.5);
+                }
+            }
+        }
+
+        // Draw enemies
+        enemies.forEach(function (e) {
+            if (!e.alive) return;
+            var emx = e.x / 1024 * size;
+            var emy = e.y / 1024 * size;
+            ctx.fillStyle = e.type === 1 ? "#f44" : "#fa0";
+            ctx.beginPath();
+            ctx.arc(emx, emy, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // Draw player
+        var pmx = px / 1024 * size;
+        var pmy = py / 1024 * size;
+        ctx.fillStyle = "#f00";
+        ctx.beginPath();
+        ctx.arc(pmx, pmy, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw look direction
+        var rad = angle / 256 * Math.PI * 2;
+        ctx.strokeStyle = "#f00";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(pmx, pmy);
+        ctx.lineTo(pmx + Math.cos(rad) * 20, pmy + Math.sin(rad) * 20);
+        ctx.stroke();
+
+        // FOV cone (67 degrees = ~0.37 * 256 angle units)
+        var fovHalf = 67 / 2 * Math.PI / 180;
+        ctx.strokeStyle = "rgba(255,0,0,0.25)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pmx, pmy);
+        ctx.lineTo(pmx + Math.cos(rad - fovHalf) * 30, pmy + Math.sin(rad - fovHalf) * 30);
+        ctx.moveTo(pmx, pmy);
+        ctx.lineTo(pmx + Math.cos(rad + fovHalf) * 30, pmy + Math.sin(rad + fovHalf) * 30);
+        ctx.stroke();
+    }
+
+    // FPS counter
+    var frameCount = 0, lastFpsTime = performance.now(), fps = 0;
+    var renderFrame = 0;  // separate counter for re-render jitter
+    var lastFrameTime = performance.now();
+
+    // --- Overlay canvas setup ---
+    var overlay = document.getElementById("overlay");
+    var octx = overlay ? overlay.getContext("2d") : null;
+
+    function gameLoop() {
+        // Delta time for frame-rate independent movement
+        var now = performance.now();
+        var dt = Math.min((now - lastFrameTime) / 1000, 0.05); // cap at 50ms
+        lastFrameTime = now;
+
+        // --- Handle restart ---
+        if (dead && pressed["KeyR"]) {
+            restartGame();
+        }
+
+        var moveAmt = 100 * dt;  // 100 units/sec (~1.5 cells/sec)
+        var turnAmt = 40 * dt;   // 40 angle-units/sec (full turn in ~6.4s)
+
+        if (!dead) {
+            // --- Turn ---
+            var turning = false;
+            if (pressed["ArrowRight"]) { angle = (angle + turnAmt) % 256; turning = true; }
+            if (pressed["ArrowLeft"])  { angle = (angle - turnAmt + 256) % 256; turning = true; }
+            if (turning) playTurnSound();
+
+            // --- Movement ---
+            var rad = angle / 256 * Math.PI * 2;
+            var cosA = Math.cos(rad);
+            var sinA = Math.sin(rad);
+            var dx = 0, dy = 0;
+            var moving = false;
+
+            if (pressed["KeyW"] || pressed["ArrowUp"]) {
+                dx += cosA * moveAmt;
+                dy += sinA * moveAmt;
+                moving = true;
+            }
+            if (pressed["KeyS"] || pressed["ArrowDown"]) {
+                dx -= cosA * moveAmt;
+                dy -= sinA * moveAmt;
+                moving = true;
+            }
+            if (pressed["KeyD"]) {
+                dx -= sinA * moveAmt;
+                dy += cosA * moveAmt;
+                moving = true;
+            }
+            if (pressed["KeyA"]) {
+                dx += sinA * moveAmt;
+                dy -= cosA * moveAmt;
+                moving = true;
+            }
+
+            if (moving) playFootstep(now / 1000);
+
+            // --- Collision (axis-independent sliding) ---
+            var newX = px + dx;
+            var newY = py + dy;
+            var margin = 8; // keep player away from walls
+
+            if (!isWall(newX + margin, py) && !isWall(newX - margin, py)) {
+                px = newX;
+            }
+            if (!isWall(px, newY + margin) && !isWall(px, newY - margin)) {
+                py = newY;
+            }
+
+            // Clamp to world bounds
+            px = Math.max(8, Math.min(1016, px));
+            py = Math.max(8, Math.min(1016, py));
+
+            // --- Update enemies ---
+            updateEnemies(dt);
+
+            // --- Shooting ---
+            if (pressed["Space"]) {
+                shoot(now / 1000);
+            }
+
+            // --- Muzzle flash timer ---
+            if (muzzleFlashTimer > 0) muzzleFlashTimer -= dt;
+        }
+
+        // --- Map game state to font axes ---
+        renderFrame++;
+        var axisX = (px / 1024 * 2000) - 1000;
+        var axisY = (py / 1024 * 2000) - 1000;
+        var axisA = (angle / 256 * 2000) - 1000;
+
+        // Clamp to axis range
+        axisX = Math.max(-1000, Math.min(1000, axisX));
+        axisY = Math.max(-1000, Math.min(1000, axisY));
+        axisA = Math.max(-1000, Math.min(1000, axisA));
+
+        // Add sub-pixel jitter to force Chrome re-hinting each frame
+        var jitter = (renderFrame % 3) * 0.01;
+
+        el.style.fontVariationSettings =
+            "'MOVX' " + (axisX + jitter).toFixed(3) +
+            ", 'MOVY' " + axisY.toFixed(3) +
+            ", 'TURN' " + axisA.toFixed(3) +
+            ", 'FIRE' 0" +
+            ", 'ACTN' 0";
+
+        // --- Render overlay ---
+        if (overlay && octx) {
+            var rect = el.getBoundingClientRect();
+            var ow = Math.round(rect.width);
+            var oh = Math.round(rect.height);
+
+            // Only resize canvas when dimensions actually change (avoids clearing cost)
+            if (overlay.width !== ow || overlay.height !== oh) {
+                overlay.width = ow;
+                overlay.height = oh;
+            } else {
+                octx.clearRect(0, 0, ow, oh);
+            }
+
+            // Position overlay to match the game element
+            overlay.style.left = Math.round(rect.left) + "px";
+            overlay.style.top = Math.round(rect.top) + "px";
+
+            if (dead) {
+                renderDeathScreen(octx, ow, oh);
+            } else {
+                renderEnemies(octx, ow, oh);
+                renderWeapon(octx, ow, oh);
+                renderHUD(octx, ow, oh);
+            }
+        }
+
+        // --- Minimap ---
+        drawMinimap();
+
+        // --- FPS ---
+        frameCount++;
+        var now2 = performance.now();
+        if (now2 - lastFpsTime >= 1000) {
+            fps = frameCount;
+            frameCount = 0;
+            lastFpsTime = now2;
+            if (statusEl) {
+                var aliveCount = enemies.filter(function (e) { return e.alive; }).length;
+                statusEl.textContent = fps + " fps | pos=(" +
+                    Math.round(px) + "," + Math.round(py) +
+                    ") angle=" + angle.toFixed(1) +
+                    " | enemies: " + aliveCount;
+            }
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    // Start after font loads
+    if (document.fonts) {
+        document.fonts.ready.then(function () {
+            if (statusEl) statusEl.textContent = "Ready";
+            gameLoop();
+        });
+    } else {
+        setTimeout(function () { gameLoop(); }, 500);
+    }
+})();
