@@ -88,25 +88,38 @@ function frame(ts) {
   // 0.56-0.78: bars morph to 3D raycasted heights
   // 0.76-0.96: hold final 3D view
 
-  // 30s cycle — no crossfade, bars ARE the letter from the start:
-  // 0-20%: solid bars with letter heights, no gaps (looks like the letter A)
-  // 20-40%: gaps grow between bars (letter visually splits apart)
-  // 38-55%: bar heights equalize to uniform
-  // 53-75%: bars morph to 3D raycasted heights
-  // 75-95%: hold final 3D view
-  var tCrossfade = 1; // bars always visible, no separate letter
-  var tSplit = ease(clamp((raw - 0.20) / 0.20));      // 20-40%: gaps grow
-  var tSolid = ease(clamp((raw - 0.38) / 0.17));      // 38-55%: uniform height
-  var tMorph = ease(clamp((raw - 0.53) / 0.22));      // 53-75%: 3D heights
+  // 30s cycle:
+  // 0-18%:  real letter A via fillText (smooth, beautiful)
+  // 16-30%: letter fades out, bars in A-shape fade in
+  // 28-44%: gaps grow — bars separate
+  // 42-56%: bar heights equalize
+  // 54-76%: bars morph to 3D heights
+  // 76-96%: hold final
+  var tLetterFade = ease(clamp((raw - 0.16) / 0.14)); // 0=letter, 1=gone
+  var tBarsIn = ease(clamp((raw - 0.14) / 0.14));     // 0=invisible, 1=bars visible
+  var tSplit = ease(clamp((raw - 0.28) / 0.16));       // gaps grow
+  var tSolid = ease(clamp((raw - 0.42) / 0.14));       // uniform height
+  var tMorph = ease(clamp((raw - 0.54) / 0.22));       // 3D heights
   var alpha = 1;
 
   ctx.globalAlpha = alpha;
 
-  // --- Draw letter A / bars as ONE continuous element ---
-  // Before crossfade: draw full letter A using fillText
-  // During crossfade: draw letter CLIPPED into 16 strips that spread apart
-  // After crossfade: draw solid bars
-  {
+  // --- Phase 1: Real letter A (fades out) ---
+  if (tLetterFade < 1) {
+    ctx.save();
+    ctx.globalAlpha = 1 - tLetterFade;
+    ctx.fillStyle = '#33ff33';
+    ctx.font = 'bold 320px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('A', W/2, H/2 - 15);
+    ctx.restore();
+  }
+
+  // --- Phase 2+: Bars (fade in, then split, equalize, morph) ---
+  if (tBarsIn > 0.01) {
+  ctx.save();
+  ctx.globalAlpha = tBarsIn;
 
   // Bar layout
   var fullW = 480; // total width for all bars combined
@@ -161,7 +174,8 @@ function frame(ts) {
     // no clip restore needed
   }
 
-  } // end of drawing block
+  ctx.restore();
+  } // end of bars block
 
   ctx.globalAlpha = alpha;
 
@@ -170,11 +184,12 @@ function frame(ts) {
   ctx.font = '14px Consolas, Courier New, monospace';
 
   var label = '';
-  if (raw < 0.22) label = 'Glyph "A" — 16 contours touching (no gaps)';
-  else if (raw < 0.40) label = 'Contours separate — glyph splits into independent bars';
-  else if (raw < 0.55) label = 'doom.ttf — bar heights equalize';
+  if (raw < 0.16) label = 'Standard font glyph — "A"';
+  else if (raw < 0.30) label = 'doom.ttf — glyph becomes 16 bar contours';
+  else if (raw < 0.44) label = 'Contours separate into independent bars';
+  else if (raw < 0.56) label = 'Bar heights equalize';
   else if (raw < 0.76) label = 'Hinting VM raycasts → SCFS stretches each bar';
-  else if (raw < 0.95) label = '3D rendered by TrueType font hinting bytecode';
+  else if (raw < 0.96) label = '3D rendered by TrueType font hinting bytecode';
 
   if (label) {
     ctx.fillStyle = '#888';
