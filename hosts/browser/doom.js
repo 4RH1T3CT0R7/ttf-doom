@@ -37,6 +37,9 @@
     var SHOT_COOLDOWN = 0.3; // seconds
     var dead = false;
 
+    // Debug overlay (toggled with D key, non-repeat only)
+    var debugMode = false;
+
     // --- Enemies ---
     var ENEMY_SPEED = 30;        // world units per second
     var ENEMY_ATTACK_RANGE = 25; // within this distance enemies deal damage
@@ -110,6 +113,8 @@
         pressed[e.code] = true;
         if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) !== -1)
             e.preventDefault();
+        // Toggle debug overlay (only on first press, not held repeats)
+        if (e.code === "KeyD" && !e.repeat) debugMode = !debugMode;
     });
     document.addEventListener("keyup", function (e) { pressed[e.code] = false; });
 
@@ -555,6 +560,175 @@
         ctx.textBaseline = "alphabetic";
     }
 
+    // --- Debug: JS raycast (mirrors font hinting VM ray marcher) ---
+    function jsRaycast(col) {
+        var ra = angle + col * 3 - 24; // FOV_HALF = 24
+        while (ra < 0) ra += 256;
+        while (ra >= 256) ra -= 256;
+        var cosVal = Math.cos(ra / 256 * Math.PI * 2) * 256;
+        var sinVal = Math.sin(ra / 256 * Math.PI * 2) * 256;
+        var rpx = px, rpy = py;
+        for (var s = 0; s < 14; s++) {
+            rpx += cosVal / 4;
+            rpy += sinVal / 4;
+            if (isWall(rpx, rpy)) {
+                return s + 1;
+            }
+        }
+        return 14; // MAX_STEPS
+    }
+
+    /** Feature 1: Font Axis Debug Overlay — shows live font-variation-settings */
+    function renderDebugOverlay(ctx, w, h, axisX, axisY, axisA) {
+        var panelW = 310;
+        var panelH = 240;
+        var panelX = 12;
+        var panelY = 40;
+
+        // Semi-transparent background
+        ctx.fillStyle = "rgba(0,0,0,0.75)";
+        ctx.fillRect(panelX, panelY, panelW, panelH);
+
+        // Border
+        ctx.strokeStyle = "#0f0";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(panelX, panelY, panelW, panelH);
+
+        // Title
+        ctx.fillStyle = "#0f0";
+        ctx.font = "bold 11px monospace";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText("font-variation-settings", panelX + 10, panelY + 8);
+
+        // Draw axis bars
+        var axes = [
+            { name: "MOVX", value: axisX },
+            { name: "MOVY", value: axisY },
+            { name: "TURN", value: axisA }
+        ];
+        var barX = panelX + 60;
+        var barW = 140;
+        var barH = 12;
+        var startY = panelY + 32;
+
+        for (var i = 0; i < axes.length; i++) {
+            var ax = axes[i];
+            var y = startY + i * 26;
+
+            // Label
+            ctx.fillStyle = "#0f0";
+            ctx.font = "bold 11px monospace";
+            ctx.fillText(ax.name, panelX + 10, y);
+
+            // Bar background
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fillRect(barX, y, barW, barH);
+            ctx.strokeStyle = "#0a0";
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(barX, y, barW, barH);
+
+            // Bar fill: (value + 1000) / 2000 maps -1000..1000 to 0..1
+            var frac = (ax.value + 1000) / 2000;
+            frac = Math.max(0, Math.min(1, frac));
+            var fillW = barW * frac;
+
+            ctx.fillStyle = "#0c0";
+            ctx.fillRect(barX, y, fillW, barH);
+
+            // Unfilled portion (dimmer)
+            ctx.fillStyle = "#030";
+            ctx.fillRect(barX + fillW, y, barW - fillW, barH);
+
+            // Value text
+            ctx.fillStyle = "#0f0";
+            ctx.font = "11px monospace";
+            ctx.fillText(ax.value.toFixed(1), barX + barW + 8, y);
+        }
+
+        // CSS string (live)
+        var cssY = startY + axes.length * 26 + 12;
+        ctx.fillStyle = "#0a0";
+        ctx.font = "10px monospace";
+        ctx.fillText("'MOVX' " + axisX.toFixed(1) + ", 'MOVY' " + axisY.toFixed(1) + ",", panelX + 10, cssY);
+        ctx.fillText("'TURN' " + axisA.toFixed(1), panelX + 10, cssY + 14);
+
+        // Font engine info
+        var infoY = cssY + 38;
+        ctx.fillStyle = "#0f0";
+        ctx.font = "bold 11px monospace";
+        ctx.fillText("TrueType Hinting VM", panelX + 10, infoY);
+
+        ctx.fillStyle = "#0a0";
+        ctx.font = "10px monospace";
+        ctx.fillText("13 FDEF functions \u2022 795 storage", panelX + 10, infoY + 16);
+        ctx.fillText("doom.ttf \u2022 6,580 bytes", panelX + 10, infoY + 30);
+    }
+
+    /** Feature 3: Glyph Inspector — shows per-column raycast bar heights */
+    function renderGlyphInspector(ctx, w, h) {
+        var inspW = 260;
+        var inspH = 180;
+        var inspX = 12;
+        var inspY = h - inspH - 40;
+
+        // Background
+        ctx.fillStyle = "rgba(0,0,0,0.75)";
+        ctx.fillRect(inspX, inspY, inspW, inspH);
+
+        // Border
+        ctx.strokeStyle = "#0f0";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(inspX, inspY, inspW, inspH);
+
+        // Title
+        ctx.fillStyle = "#0f0";
+        ctx.font = "bold 11px monospace";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText("Glyph 'A' \u2014 16 contours, 64 points", inspX + 8, inspY + 6);
+
+        // Bar chart area
+        var chartX = inspX + 14;
+        var chartY = inspY + 26;
+        var chartW = inspW - 28;
+        var chartH = inspH - 60;
+        var numCols = 16;
+        var barW = 12;
+        var gap = (chartW - numCols * barW) / (numCols - 1);
+
+        for (var col = 0; col < numCols; col++) {
+            var steps = jsRaycast(col);
+
+            // Bar height proportional to wall distance (closer = taller bar)
+            // steps ranges 1..14: 1=very close (tall bar), 14=far (short bar)
+            var barFrac = 1 - (steps - 1) / 13; // 1=full height, 0=minimum
+            var barH = Math.max(4, chartH * barFrac);
+
+            var bx = chartX + col * (barW + gap);
+            var by = chartY + chartH - barH;
+
+            // Bar fill
+            var intensity = Math.floor(100 + 155 * barFrac);
+            ctx.fillStyle = "rgb(0," + intensity + ",0)";
+            ctx.fillRect(bx, by, barW, barH);
+
+            // Bar outline
+            ctx.strokeStyle = "#0a0";
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(bx, by, barW, barH);
+
+            // Column index label
+            ctx.fillStyle = "#0a0";
+            ctx.font = "8px monospace";
+            ctx.textAlign = "center";
+            ctx.fillText(col.toString(), bx + barW / 2, chartY + chartH + 10);
+        }
+
+        // Reset text alignment
+        ctx.textAlign = "left";
+    }
+
     // --- Minimap ---
     function drawMinimap() {
         var c = document.getElementById("minimap");
@@ -614,6 +788,53 @@
         ctx.moveTo(pmx, pmy);
         ctx.lineTo(pmx + Math.cos(rad + fovHalf) * 30, pmy + Math.sin(rad + fovHalf) * 30);
         ctx.stroke();
+
+        // Feature 2: Ray visualization (only in debug mode)
+        if (debugMode) {
+            var dbgFovHalf = 24; // must match font's FOV_HALF
+            var dbgNumCols = 16; // must match font's NUM_COLS
+
+            for (var col = 0; col < dbgNumCols; col++) {
+                var rayAngle = angle + col * 3 - dbgFovHalf;
+                var rayRad = rayAngle / 256 * Math.PI * 2;
+
+                var rx = px, ry = py;
+                var rdx = Math.cos(rayRad) * 16;
+                var rdy = Math.sin(rayRad) * 16;
+
+                // Step until hitting a wall (mirrors font's ray marcher)
+                for (var rs = 0; rs < 14; rs++) {
+                    rx += rdx;
+                    ry += rdy;
+                    if (isWall(rx, ry)) break;
+                }
+
+                // Map to minimap coordinates
+                var startMX = px / 1024 * size;
+                var startMY = py / 1024 * size;
+                var endMX = rx / 1024 * size;
+                var endMY = ry / 1024 * size;
+
+                // Color by distance (green = far, yellow = mid, red = close)
+                var rdist = Math.sqrt((rx - px) * (rx - px) + (ry - py) * (ry - py));
+                var maxDist = 14 * 16;
+                var t = Math.min(1, rdist / maxDist);
+                var rr = Math.floor(255 * (1 - t));
+                var rg = Math.floor(255 * t);
+                ctx.strokeStyle = "rgba(" + rr + "," + rg + ",0,0.6)";
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(startMX, startMY);
+                ctx.lineTo(endMX, endMY);
+                ctx.stroke();
+
+                // Hit point dot
+                ctx.fillStyle = "#ff0";
+                ctx.beginPath();
+                ctx.arc(endMX, endMY, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
     }
 
     // FPS counter
@@ -749,6 +970,12 @@
                 renderEnemies(octx, ow, oh);
                 renderWeapon(octx, ow, oh);
                 renderHUD(octx, ow, oh);
+            }
+
+            // Debug overlays (drawn on top of everything)
+            if (debugMode) {
+                renderDebugOverlay(octx, ow, oh, axisX, axisY, axisA);
+                renderGlyphInspector(octx, ow, oh);
             }
         }
 
