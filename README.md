@@ -2,11 +2,24 @@
 
 **A 3D raycasting engine running inside a TrueType font's hinting virtual machine.**
 
-The font's glyph hinting program performs DDA raycasting and repositions vertical bar contours to render a first-person 3D view. The entire rendering engine lives in 6.5 KB of TrueType bytecode.
+Yes, the font file is the game engine. No, we are not sorry.
 
 <p align="center">
-  <a href="https://4rh1t3ct0r7.github.io/ttf-doom/"><strong>Play in browser</strong></a>
+  <a href="https://4rh1t3ct0r7.github.io/ttf-doom/">
+    <img src="https://img.shields.io/badge/PLAY_IN_BROWSER-00cc44?style=for-the-badge" alt="Play in Browser" />
+  </a>
 </p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/font_size-6.5_KB-2563eb?style=flat-square" />
+  <img src="https://img.shields.io/badge/rendering-TrueType_bytecode-f97316?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-451_passing-22c55e?style=flat-square" />
+  <img src="https://img.shields.io/badge/license-Apache_2.0-6366f1?style=flat-square" />
+</p>
+
+The first project to use the TrueType hinting instruction set for 3D rendering. Previous font-based computation projects (such as [llama.ttf](https://github.com/fuglede/llama.ttf)) rely on HarfBuzz WebAssembly shaping — a completely different mechanism. TTF-DOOM runs directly in the hinting bytecode interpreter (FDEF, CALL, RS, WS, SCFS) that ships with every TrueType renderer on every operating system.
+
+The entire rendering engine fits in 6,580 bytes.
 
 ---
 
