@@ -103,11 +103,19 @@ function frame(ts){
     for(var col=0;col<NUM;col++){
       var ce=colEdges[col];
 
-      // Position: letter strip → bar position
+      // Position: during split, fragments stay at letter position but gaps appear
+      // During straighten, they move to final bar positions
       var lCX=letterL+(col+.5)*stripW;
+      // Split position: same center as letter but with gaps inserted
+      var splitGap = gapMax * tSplit;
+      var splitTotalW = NUM * stripW + (NUM-1) * splitGap;
+      var splitL = W/2 - splitTotalW/2;
+      var splitCX = splitL + col * (stripW + splitGap) + stripW/2;
+      // Final bar position
       var bCX=barsL+col*(barW+gapMax)+barW/2;
-      var cx=lerp(lCX,bCX,tSplit);
-      // Width: stays at letter strip width during split, narrows to barW during straighten
+      // During split: letter→split (gaps only). During straighten: split→bar (width narrows)
+      var cx=lerp(lerp(lCX,splitCX,tSplit), bCX, tStraighten);
+      // Width: full strip width during split, narrows during straighten
       var w=lerp(stripW,barW,tStraighten);
       var x0=cx-w/2;
 
