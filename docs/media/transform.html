@@ -86,7 +86,7 @@ function frame(ts){
   var tMorph     = ease(clamp((raw-.42)/.20));
   var tFade      = 1-ease(clamp((raw-.90)/.08));
 
-  var letterW=360, letterL=W/2-letterW/2, stripW=letterW/NUM;
+  var letterW=440, letterL=W/2-letterW/2, stripW=letterW/NUM;
   var barW=30, gapMax=4;
   var totBW=NUM*barW+(NUM-1)*gapMax, barsL=W/2-totBW/2;
 
@@ -107,7 +107,8 @@ function frame(ts){
       var lCX=letterL+(col+.5)*stripW;
       var bCX=barsL+col*(barW+gapMax)+barW/2;
       var cx=lerp(lCX,bCX,tSplit);
-      var w=lerp(stripW,barW,tSplit);
+      // Width: stays at letter strip width during split, narrows to barW during straighten
+      var w=lerp(stripW,barW,tStraighten);
       var x0=cx-w/2;
 
       // For each pixel column within the strip, compute the edge
