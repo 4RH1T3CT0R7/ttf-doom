@@ -57,17 +57,17 @@ function frame(ts){
   // 0-12%:   smooth letter A (fillText, one piece)
   // 10-16%:  cut lines appear on the letter
   // 14-28%:  letter SPLITS: clipped fillText strips separate (gaps grow)
-  // 26-42%:  strips STRETCH: clip height grows, letter stretches inside
-  // 40-46%:  crossfade stretched letter → solid green bars
-  // 44-64%:  bars morph to 3D heights
-  // 62-90%:  hold final
+  // 14-28%:  letter SPLITS into clipped strips (gaps grow)
+  // 26-44%:  strips STRETCH tall + edges STRAIGHTEN (letter→rect crossfade)
+  // 42-62%:  bars morph to 3D heights
+  // 60-90%:  hold final
   // 90-100%: fade
 
   var tCuts     = ease(clamp((raw-.10)/.06));   // cut lines appear
   var tSplit    = ease(clamp((raw-.14)/.14));    // strips separate
-  var tStretch  = ease(clamp((raw-.26)/.16));    // strips stretch tall
-  var tSolidify = ease(clamp((raw-.40)/.06));    // letter texture → solid bar
-  var tMorph    = ease(clamp((raw-.44)/.20));    // uniform → 3D
+  var tStretch  = ease(clamp((raw-.26)/.18));    // strips stretch tall
+  var tSolidify = ease(clamp((raw-.28)/.16));    // edges straighten (SLOW: 4.5 seconds)
+  var tMorph    = ease(clamp((raw-.42)/.20));    // uniform → 3D
   var tFade     = 1-ease(clamp((raw-.90)/.08));
 
   // Layout constants
@@ -171,19 +171,19 @@ function frame(ts){
   var label='';
   if(raw<.12) label='Standard font glyph — "A"';
   else if(raw<.18) label='Cutting into 16 vertical fragments';
-  else if(raw<.30) label='Fragments of the letter separate';
-  else if(raw<.44) label='Each fragment stretches into a rectangle';
-  else if(raw<.64) label='Hinting VM raycasts → SCFS sets bar heights';
+  else if(raw<.28) label='Fragments of the letter separate';
+  else if(raw<.44) label='Curved edges straighten → rectangular contours';
+  else if(raw<.62) label='Hinting VM raycasts → SCFS sets bar heights';
   else if(raw<.90) label='3D rendered by TrueType font hinting bytecode';
   if(label){ctx.fillStyle='#888';ctx.fillText(label,W/2,22);}
 
-  if(raw>.34&&raw<.90){
+  if(raw>.36&&raw<.90){
     ctx.save();ctx.globalAlpha=clamp((raw-.34)/.06)*clamp((.90-raw)/.04)*.5;
     ctx.fillStyle='#555';ctx.font='11px Consolas,monospace';
     ctx.fillText("font-variation-settings: 'MOVX' -62, 'TURN' "+lerp(-1000,0,tMorph).toFixed(0),W/2,H-14);
     ctx.restore();
   }
-  if(raw>.64&&raw<.90){
+  if(raw>.62&&raw<.90){
     ctx.save();ctx.globalAlpha=clamp((raw-.64)/.04)*.4;
     ctx.fillStyle='#444';ctx.font='10px Consolas,monospace';
     ctx.fillText('doom.ttf  •  6,580 bytes  •  13 FDEF  •  795 storage',W/2,H-2);
