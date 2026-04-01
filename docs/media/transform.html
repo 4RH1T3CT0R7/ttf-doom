@@ -13,23 +13,42 @@
 <script>
 var C=document.getElementById('c'), ctx=C.getContext('2d'), W=900, H=500, NUM=16;
 
-// Sample letter extents per column from offscreen render
+// Offscreen letter
 var lc=document.createElement('canvas'); lc.width=W; lc.height=H;
 var lx=lc.getContext('2d');
-var lTops=[], lBots=[];
+
+// Per-column: detailed edge profile (top/bottom at each pixel row)
+// For each column strip, store arrays of top-edge and bottom-edge x-positions
+var colEdges=[]; // colEdges[col] = { tops: [y values of top edge per x], bots: [...], minTop, maxBot }
+
 function init(){
   lx.fillStyle='#080808'; lx.fillRect(0,0,W,H);
   lx.fillStyle='#33ff33';
   lx.font='bold 320px Arial,sans-serif';
   lx.textAlign='center'; lx.textBaseline='middle';
   lx.fillText('A',W/2,H/2-10);
-  var sw=Math.ceil(W/NUM);
-  for(var c=0;c<NUM;c++){
-    var sx=c*sw, w=Math.min(sw,W-sx);
-    var img=lx.getImageData(sx,0,w,H), top=H, bot=0;
-    for(var y=0;y<H;y++) for(var x=0;x<w;x++)
-      if(img.data[(y*w+x)*4+1]>30){if(y<top)top=y;if(y>bot)bot=y;}
-    lTops[c]=top<H?top:H*.3; lBots[c]=bot>0?bot:H*.7;
+
+  var stripW=Math.ceil(W/NUM);
+  for(var col=0;col<NUM;col++){
+    var sx=col*stripW, sw=Math.min(stripW,W-sx);
+    var img=lx.getImageData(sx,0,sw,H);
+    var topEdge=[], botEdge=[];
+    var minTop=H, maxBot=0;
+    // For each x within the strip, find topmost and bottommost green pixel
+    for(var x=0;x<sw;x++){
+      var t=H, b=0;
+      for(var y=0;y<H;y++){
+        if(img.data[(y*sw+x)*4+1]>30){
+          if(y<t) t=y;
+          if(y>b) b=y;
+        }
+      }
+      topEdge.push(t<H?t:H/2);
+      botEdge.push(b>0?b:H/2);
+      if(t<minTop) minTop=t;
+      if(b>maxBot) maxBot=b;
+    }
+    colEdges.push({tops:topEdge, bots:botEdge, minTop:minTop, maxBot:maxBot, sw:sw, sx:sx});
   }
 }
 
@@ -53,111 +72,123 @@ function frame(ts){
   var raw=((ts-t0)%T)/T;
   ctx.fillStyle='#080808'; ctx.fillRect(0,0,W,H);
 
-  // TIMELINE:
-  // 0-12%:   smooth letter A (fillText, one piece)
-  // 10-16%:  cut lines appear on the letter
-  // 14-28%:  letter SPLITS: clipped fillText strips separate (gaps grow)
-  // 14-28%:  letter SPLITS into clipped strips (gaps grow)
-  // 26-44%:  strips STRETCH tall + edges STRAIGHTEN (letter→rect crossfade)
-  // 42-62%:  bars morph to 3D heights
-  // 60-90%:  hold final
+  // 0-10%: smooth letter
+  // 10-14%: cut lines appear
+  // 14-28%: fragments separate (clipped letter pieces with curved edges)
+  // 26-44%: curved edges straighten into rectangles (the KEY animation)
+  // 42-62%: bars morph to 3D
+  // 60-90%: hold
   // 90-100%: fade
 
-  var tCuts     = ease(clamp((raw-.10)/.06));   // cut lines appear
-  var tSplit    = ease(clamp((raw-.14)/.14));    // strips separate
-  var tStretch  = ease(clamp((raw-.26)/.18));    // strips stretch tall
-  var tSolidify = ease(clamp((raw-.28)/.16));    // edges straighten (SLOW: 4.5 seconds)
-  var tMorph    = ease(clamp((raw-.42)/.20));    // uniform → 3D
-  var tFade     = 1-ease(clamp((raw-.90)/.08));
+  var tCuts      = ease(clamp((raw-.10)/.04));
+  var tSplit     = ease(clamp((raw-.14)/.14));
+  var tStraighten= ease(clamp((raw-.26)/.18)); // curved letter edges → straight rect edges
+  var tMorph     = ease(clamp((raw-.42)/.20));
+  var tFade      = 1-ease(clamp((raw-.90)/.08));
 
-  // Layout constants
   var letterW=360, letterL=W/2-letterW/2, stripW=letterW/NUM;
   var barW=30, gapMax=4;
   var totBW=NUM*barW+(NUM-1)*gapMax, barsL=W/2-totBW/2;
 
   ctx.globalAlpha=tFade;
 
-  // --- Phase 1: Full smooth letter (before any cutting) ---
+  // Phase 1: full letter (no cuts yet)
   if(tCuts<.01){
     ctx.fillStyle='#33ff33';
     ctx.font='bold 320px Arial,sans-serif';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText('A',W/2,H/2-10);
-  }
-  else {
-    // --- Phases 2-5: Per-column rendering ---
+  } else {
+    // Per-column rendering
     for(var col=0;col<NUM;col++){
-      // Position: letter strip center → bar center
+      var ce=colEdges[col];
+
+      // Position: letter strip → bar position
       var lCX=letterL+(col+.5)*stripW;
       var bCX=barsL+col*(barW+gapMax)+barW/2;
       var cx=lerp(lCX,bCX,tSplit);
       var w=lerp(stripW,barW,tSplit);
-
-      // Height: letter extent → full rect → 3D
-      var lt=lTops[col], lb=lBots[col];
-      var ut=H*.08, ub=H*.92;  // full-height rect
-      var clipTop=lerp(lt,ut,tStretch);
-      var clipBot=lerp(lb,ub,tStretch);
-
-      // 3D morph
-      var ft=lerp(clipTop,tgtT[col]*H,tMorph);
-      var fb=lerp(clipBot,tgtB[col]*H,tMorph);
-
       var x0=cx-w/2;
-      var y0=ft, y1=fb, barH=y1-y0;
 
+      // For each pixel column within the strip, compute the edge
+      // Interpolate from curved letter edge → straight rect edge
+      var rectTop=lerp(ce.minTop, H*.08, tStraighten*tMorph<.01?tStraighten:1);
+      var rectBot=lerp(ce.maxBot, H*.92, tStraighten*tMorph<.01?tStraighten:1);
+
+      // 3D morph of uniform rect
+      var finTop=lerp(rectTop, tgtT[col]*H, tMorph);
+      var finBot=lerp(rectBot, tgtB[col]*H, tMorph);
+
+      // Draw using shaped clip path that morphs from letter shape to rectangle
       ctx.save();
 
-      if(tSolidify<.95){
-        // Draw CLIPPED smooth letter (the letter texture stretches as clip grows)
+      ctx.beginPath();
+      // Top edge: go left to right
+      var pixelsInStrip=ce.sw;
+      var scaleX=w/pixelsInStrip;
+
+      for(var px=0;px<pixelsInStrip;px++){
+        // Letter top edge at this pixel
+        var letterTop=ce.tops[px];
+        // Straightened top: interpolate toward flat line
+        var edgeTop=lerp(letterTop, finTop, tStraighten);
+        var screenX=x0+px*scaleX;
+        if(px===0) ctx.moveTo(screenX, edgeTop);
+        else ctx.lineTo(screenX, edgeTop);
+      }
+      // Right side down
+      var lastBot=lerp(ce.bots[pixelsInStrip-1], finBot, tStraighten);
+      ctx.lineTo(x0+w, lastBot);
+      // Bottom edge: right to left
+      for(var px=pixelsInStrip-1;px>=0;px--){
+        var letterBot=ce.bots[px];
+        var edgeBot=lerp(letterBot, finBot, tStraighten);
+        ctx.lineTo(x0+px*scaleX, edgeBot);
+      }
+      ctx.closePath();
+      ctx.clip();
+
+      // Fill with letter texture (clipped to the morphing shape)
+      if(tMorph<.95){
         ctx.save();
-        ctx.globalAlpha=tFade*(1-tSolidify);
-        ctx.beginPath();
-        ctx.rect(x0, y0, w, barH);
-        ctx.clip();
-        // Position the letter so this column's strip appears in the clip
-        var shift=x0+w/2-lCX;
-        // Vertical scale: stretch the letter to fill the growing clip
-        var origH=lb-lt;
-        var scaleY=barH/Math.max(1,origH);
-        ctx.translate(W/2+shift, y0+barH/2);
-        ctx.scale(1, scaleY);
-        ctx.translate(-(W/2+shift), -(lt+origH/2));
+        ctx.globalAlpha=tFade*Math.max(0,1-tMorph);
+        // Draw letter shifted so this column's content appears here
+        var shift=cx-lCX;
         ctx.fillStyle='#33ff33';
         ctx.font='bold 320px Arial,sans-serif';
         ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText('A',W/2+shift,H/2-10);
         ctx.restore();
       }
-
-      if(tSolidify>.05){
-        // Solid bar (fades in during solidify phase)
-        var bright=Math.floor(lerp(160,40+190*(barH/H),tMorph));
+      if(tMorph>.05||tStraighten>.5){
+        // Solid green fill (fades in as edges straighten)
+        var solidAlpha=Math.max(tMorph, (tStraighten-.5)*2);
+        var bright=Math.floor(lerp(150,40+190*((finBot-finTop)/H),tMorph));
         bright=Math.max(30,Math.min(230,bright));
         ctx.save();
-        ctx.globalAlpha=tFade*Math.min(1,tSolidify);
+        ctx.globalAlpha=tFade*Math.min(1,solidAlpha);
         ctx.fillStyle='rgb(0,'+bright+',0)';
-        ctx.fillRect(x0,y0,w,barH);
+        ctx.fillRect(x0,finTop,w,finBot-finTop);
         ctx.restore();
       }
 
+      ctx.restore(); // restore clip
+
       // Edge outlines
-      if(tSplit>.08){
-        ctx.strokeStyle='rgba(0,180,0,'+(0.1+.25*Math.min(1,tStretch))+')';
+      if(tSplit>.1){
+        ctx.strokeStyle='rgba(0,180,0,'+(0.1+.2*tStraighten)+')';
         ctx.lineWidth=1;
-        ctx.strokeRect(x0+.5,y0+.5,w-1,barH-1);
+        ctx.strokeRect(x0+.5,finTop+.5,w-1,(finBot-finTop)-1);
       }
 
-      ctx.restore();
-
-      // Cut lines (on the letter, before splitting)
+      // Cut lines
       if(tCuts>.01&&tSplit<.15){
         ctx.save();
-        ctx.globalAlpha=.7*(1-tSplit*7)*tFade;
+        ctx.globalAlpha=.6*(1-tSplit*7)*tFade;
         ctx.strokeStyle='#88ff88'; ctx.lineWidth=1.5;
         ctx.beginPath();
-        ctx.moveTo(letterL+col*stripW, lt-15);
-        ctx.lineTo(letterL+col*stripW, lb+15);
+        ctx.moveTo(letterL+col*stripW,ce.minTop-10);
+        ctx.lineTo(letterL+col*stripW,ce.maxBot+10);
         ctx.stroke();
         ctx.restore();
       }
@@ -170,21 +201,21 @@ function frame(ts){
   ctx.font='14px Consolas,Courier New,monospace';
   var label='';
   if(raw<.12) label='Standard font glyph — "A"';
-  else if(raw<.18) label='Cutting into 16 vertical fragments';
+  else if(raw<.16) label='Cutting into 16 vertical fragments';
   else if(raw<.28) label='Fragments of the letter separate';
-  else if(raw<.44) label='Curved edges straighten → rectangular contours';
+  else if(raw<.44) label='Curved edges straighten into rectangles';
   else if(raw<.62) label='Hinting VM raycasts → SCFS sets bar heights';
   else if(raw<.90) label='3D rendered by TrueType font hinting bytecode';
   if(label){ctx.fillStyle='#888';ctx.fillText(label,W/2,22);}
 
   if(raw>.36&&raw<.90){
-    ctx.save();ctx.globalAlpha=clamp((raw-.34)/.06)*clamp((.90-raw)/.04)*.5;
+    ctx.save();ctx.globalAlpha=clamp((raw-.36)/.06)*clamp((.90-raw)/.04)*.5;
     ctx.fillStyle='#555';ctx.font='11px Consolas,monospace';
     ctx.fillText("font-variation-settings: 'MOVX' -62, 'TURN' "+lerp(-1000,0,tMorph).toFixed(0),W/2,H-14);
     ctx.restore();
   }
-  if(raw>.62&&raw<.90){
-    ctx.save();ctx.globalAlpha=clamp((raw-.64)/.04)*.4;
+  if(raw>.60&&raw<.90){
+    ctx.save();ctx.globalAlpha=clamp((raw-.60)/.04)*.4;
     ctx.fillStyle='#444';ctx.font='10px Consolas,monospace';
     ctx.fillText('doom.ttf  •  6,580 bytes  •  13 FDEF  •  795 storage',W/2,H-2);
     ctx.restore();
