@@ -148,29 +148,12 @@ function frame(ts){
       ctx.closePath();
       ctx.clip();
 
-      // Fill with letter texture (clipped to the morphing shape)
-      if(tMorph<.95){
-        ctx.save();
-        ctx.globalAlpha=tFade*Math.max(0,1-tMorph);
-        // Draw letter shifted so this column's content appears here
-        var shift=cx-lCX;
-        ctx.fillStyle='#33ff33';
-        ctx.font='bold 320px Arial,sans-serif';
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('A',W/2+shift,H/2-10);
-        ctx.restore();
-      }
-      if(tMorph>.05||tStraighten>.5){
-        // Solid green fill (fades in as edges straighten)
-        var solidAlpha=Math.max(tMorph, (tStraighten-.5)*2);
-        var bright=Math.floor(lerp(150,40+190*((finBot-finTop)/H),tMorph));
-        bright=Math.max(30,Math.min(230,bright));
-        ctx.save();
-        ctx.globalAlpha=tFade*Math.min(1,solidAlpha);
-        ctx.fillStyle='rgb(0,'+bright+',0)';
-        ctx.fillRect(x0,finTop,w,finBot-finTop);
-        ctx.restore();
-      }
+      // ONE SOLID FILL — no fade, no crossfade, no transparency tricks
+      // Color shifts from bright green (letter) to distance-shaded (3D) during morph
+      var bright=Math.floor(lerp(150, 40+190*((finBot-finTop)/H), tMorph));
+      bright=Math.max(30,Math.min(230,bright));
+      ctx.fillStyle='rgb(0,'+bright+',0)';
+      ctx.fillRect(x0, Math.min(finTop, ce.minTop), w, Math.max(finBot,ce.maxBot)-Math.min(finTop,ce.minTop)+1);
 
       ctx.restore(); // restore clip
 
