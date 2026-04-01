@@ -24,7 +24,7 @@ var colEdges=[]; // colEdges[col] = { tops: [y values of top edge per x], bots: 
 function init(){
   lx.fillStyle='#080808'; lx.fillRect(0,0,W,H);
   lx.fillStyle='#33ff33';
-  lx.font='bold 320px Arial,sans-serif';
+  lx.font='bold 400px Arial,sans-serif';
   lx.textAlign='center'; lx.textBaseline='middle';
   lx.fillText('A',W/2,H/2-10);
 
@@ -86,7 +86,7 @@ function frame(ts){
   var tMorph     = ease(clamp((raw-.42)/.20));
   var tFade      = 1-ease(clamp((raw-.90)/.08));
 
-  var letterW=440, letterL=W/2-letterW/2, stripW=letterW/NUM;
+  var letterW=540, letterL=W/2-letterW/2, stripW=letterW/NUM;
   var barW=30, gapMax=4;
   var totBW=NUM*barW+(NUM-1)*gapMax, barsL=W/2-totBW/2;
 
@@ -95,7 +95,7 @@ function frame(ts){
   // Phase 1: full letter (no cuts yet)
   if(tCuts<.01){
     ctx.fillStyle='#33ff33';
-    ctx.font='bold 320px Arial,sans-serif';
+    ctx.font='bold 400px Arial,sans-serif';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText('A',W/2,H/2-10);
   } else {
