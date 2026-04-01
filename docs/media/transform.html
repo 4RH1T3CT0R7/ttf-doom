@@ -179,8 +179,8 @@ function frame(ts){
         ctx.globalAlpha=.6*(1-tSplit*7)*tFade;
         ctx.strokeStyle='#88ff88'; ctx.lineWidth=1.5;
         ctx.beginPath();
-        ctx.moveTo(letterL+col*stripW,ce.minTop-10);
-        ctx.lineTo(letterL+col*stripW,ce.maxBot+10);
+        ctx.moveTo(letterL+col*stripW, 20);
+        ctx.lineTo(letterL+col*stripW, H-20);
         ctx.stroke();
         ctx.restore();
       }
