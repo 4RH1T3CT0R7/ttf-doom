@@ -92,14 +92,56 @@ function frame(ts){
 
   ctx.globalAlpha=tFade;
 
-  // Phase 1: full letter (no cuts yet)
-  if(tCuts<.01){
+  // PHASE 1+2: Draw full letter, then cut black gaps over it to "slice" it.
+  // The letter stays visible throughout — gaps widen to physically cut it.
+  // Once gaps are wide enough (tSplit>.8), switch to clip-path fragments.
+
+  // Crossfade zone: 0.5-0.9 of tSplit — both methods overlap
+  var letterAlpha = 1 - ease(clamp((tSplit - 0.4) / 0.5)); // letter fades 0.4-0.9
+  var fragAlpha = ease(clamp((tSplit - 0.3) / 0.5));        // fragments appear 0.3-0.8
+
+  // Layer 1: Smooth letter with black gap cuts
+  if (letterAlpha > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = tFade * letterAlpha;
     ctx.fillStyle='#33ff33';
     ctx.font='bold 400px Arial,sans-serif';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText('A',W/2,H/2-10);
-  } else {
-    // Per-column rendering
+
+    // Black gap lines cutting through the letter
+    if (tCuts > 0.01) {
+      ctx.globalAlpha = tFade;
+      for (var col=0; col<NUM; col++) {
+        var gapWidth = tSplit * gapMax * 2;
+        var lineX = letterL + col * stripW;
+        if (gapWidth > 0.3) {
+          ctx.fillStyle='#080808';
+          ctx.fillRect(lineX - gapWidth/2, 0, gapWidth, H);
+        }
+      }
+    }
+    ctx.restore();
+
+    // Cut lines
+    if (tCuts > 0.01 && tSplit < 0.4) {
+      for (var col=0; col<NUM; col++) {
+        ctx.save();
+        ctx.globalAlpha = 0.7 * (1-tSplit*2.5) * tFade;
+        ctx.strokeStyle='#88ff88'; ctx.lineWidth=1.5;
+        ctx.beginPath();
+        ctx.moveTo(letterL+col*stripW, 20);
+        ctx.lineTo(letterL+col*stripW, H-20);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  // Layer 2: Clip-path fragments (fade in over letter)
+  if (fragAlpha > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = tFade * fragAlpha;
     for(var col=0;col<NUM;col++){
       var ce=colEdges[col];
 
@@ -173,18 +215,9 @@ function frame(ts){
         ctx.strokeRect(x0+.5,finTop+.5,w-1,(finBot-finTop)-1);
       }
 
-      // Cut lines
-      if(tCuts>.01&&tSplit<.15){
-        ctx.save();
-        ctx.globalAlpha=.6*(1-tSplit*7)*tFade;
-        ctx.strokeStyle='#88ff88'; ctx.lineWidth=1.5;
-        ctx.beginPath();
-        ctx.moveTo(letterL+col*stripW, 20);
-        ctx.lineTo(letterL+col*stripW, H-20);
-        ctx.stroke();
-        ctx.restore();
-      }
+      // (cut lines are drawn in Layer 1)
     }
+    ctx.restore(); // end Layer 2 alpha
   }
 
   // Labels
