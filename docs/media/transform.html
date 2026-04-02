@@ -1,68 +1,93 @@
 <!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #080808; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
-  canvas { display: block; }
-</style>
-</head>
-<body>
+<html><head><meta charset="UTF-8">
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#080808;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden}canvas{display:block}</style>
+</head><body>
 <canvas id="c" width="900" height="500"></canvas>
 <script>
-var C=document.getElementById('c'), ctx=C.getContext('2d'), W=900, H=500, NUM=16;
+var C=document.getElementById('c'),ctx=C.getContext('2d'),W=900,H=500;
 
-// Offscreen letter
-var lc=document.createElement('canvas'); lc.width=W; lc.height=H;
-var lx=lc.getContext('2d');
+// Letter "A" as a polygon (outer + hole), coordinates in 0..1 space
+// Outer contour (clockwise)
+var outerA = [
+  [0.35,1],[0.05,1],[0.38,0],[0.62,0],[0.95,1],[0.65,1],
+  [0.58,0.75],[0.42,0.75],[0.35,1]
+];
+// Inner hole (counter-clockwise)
+var holeA = [
+  [0.44,0.55],[0.50,0.30],[0.56,0.55],[0.44,0.55]
+];
 
-// Per-column: detailed edge profile (top/bottom at each pixel row)
-// For each column strip, store arrays of top-edge and bottom-edge x-positions
-var colEdges=[]; // colEdges[col] = { tops: [y values of top edge per x], bots: [...], minTop, maxBot }
+// Scale letter to screen
+var LW=420, LH=400, LX=W/2-LW/2, LY=H/2-LH/2+10;
+function lp(p){return [LX+p[0]*LW, LY+p[1]*LH];}
 
-function init(){
-  lx.fillStyle='#080808'; lx.fillRect(0,0,W,H);
-  lx.fillStyle='#33ff33';
-  lx.font='bold 400px Arial,sans-serif';
-  lx.textAlign='center'; lx.textBaseline='middle';
-  lx.fillText('A',W/2,H/2-10);
+// For each of 16 columns, define the TARGET rectangle (bar)
+var NUM=16, barW=30, gapMax=4;
+var totBW=NUM*barW+(NUM-1)*gapMax, barsLX=W/2-totBW/2;
 
-  var stripW=Math.ceil(W/NUM);
-  for(var col=0;col<NUM;col++){
-    var sx=col*stripW, sw=Math.min(stripW,W-sx);
-    var img=lx.getImageData(sx,0,sw,H);
-    var topEdge=[], botEdge=[];
-    var minTop=H, maxBot=0;
-    // For each x within the strip, find topmost and bottommost green pixel
-    for(var x=0;x<sw;x++){
-      var t=H, b=0;
-      for(var y=0;y<H;y++){
-        if(img.data[(y*sw+x)*4+1]>30){
-          if(y<t) t=y;
-          if(y>b) b=y;
-        }
-      }
-      topEdge.push(t<H?t:H/2);
-      botEdge.push(b>0?b:H/2);
-      if(t<minTop) minTop=t;
-      if(b>maxBot) maxBot=b;
-    }
-    colEdges.push({tops:topEdge, bots:botEdge, minTop:minTop, maxBot:maxBot, sw:sw, sx:sx});
-  }
-}
-
-// 3D targets
+// Raycasted 3D heights
 var MAP=[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1];
 function isWall(x,y){var g=Math.floor(x/64),h=Math.floor(y/64);return g<0||g>=16||h<0||h>=16||MAP[h*16+g]===1;}
 var tgtT=[],tgtB=[];
 for(var i=0;i<NUM;i++){
   var ra=i*3-24,dx=Math.cos(ra/256*Math.PI*2)*64,dy=Math.sin(ra/256*Math.PI*2)*64,px=480,py=480,d=14;
   for(var s=0;s<14;s++){px+=dx;py+=dy;if(isWall(px,py)){d=s+1;break;}}
-  var h=Math.min(.92,900/d/H); tgtT[i]=.5-h/2; tgtB[i]=.5+h/2;
+  var h=Math.min(.92,900/d/H);tgtT[i]=.5-h/2;tgtB[i]=.5+h/2;
 }
 
-var T=28000, t0=null;
+// For each column, compute what part of the "A" letter it intersects
+// Sample the letter polygon at each column to find top/bottom
+function sampleLetterColumn(col){
+  var stripW=LW/NUM;
+  var cx=LX+col*stripW+stripW/2;
+  // Cast vertical line through the A polygon
+  // Find intersections with outer and hole
+  var tops=[], bots=[];
+  // Simple: render A to offscreen, sample pixels
+  return null; // we'll use a different approach
+}
+
+// Pre-render letter to offscreen for sampling
+var lc=document.createElement('canvas');lc.width=W;lc.height=H;
+var lx=lc.getContext('2d');
+lx.fillStyle='#080808';lx.fillRect(0,0,W,H);
+// Draw letter A polygon
+lx.fillStyle='#fff';
+lx.beginPath();
+outerA.forEach(function(p,i){var sp=lp(p);i?lx.lineTo(sp[0],sp[1]):lx.moveTo(sp[0],sp[1]);});
+lx.closePath();
+holeA.forEach(function(p,i){var sp=lp(p);i?lx.lineTo(sp[0],sp[1]):lx.moveTo(sp[0],sp[1]);});
+lx.closePath();
+lx.fill('evenodd');
+
+// Sample top/bottom per column
+var colTops=[],colBots=[];
+var stripPx=Math.ceil(W/NUM);
+for(var col=0;col<NUM;col++){
+  var sx=col*stripPx,sw=Math.min(stripPx,W-sx);
+  var img=lx.getImageData(sx,0,sw,H);
+  var top=H,bot=0;
+  for(var y=0;y<H;y++)for(var x=0;x<sw;x++)
+    if(img.data[(y*sw+x)*4]>128){if(y<top)top=y;if(y>bot)bot=y;}
+  colTops[col]=top<H?top:H*.3;
+  colBots[col]=bot>0?bot:H*.7;
+}
+
+// Per-column detailed edge (pixel-level)
+var colEdgeT=[],colEdgeB=[];
+for(var col=0;col<NUM;col++){
+  var sx=col*stripPx,sw=Math.min(stripPx,W-sx);
+  var img=lx.getImageData(sx,0,sw,H);
+  var tops=[],bots=[];
+  for(var x=0;x<sw;x++){
+    var t=H,b=0;
+    for(var y=0;y<H;y++)if(img.data[(y*sw+x)*4]>128){if(y<t)t=y;if(y>b)b=y;}
+    tops.push(t<H?t:H/2);bots.push(b>0?b:H/2);
+  }
+  colEdgeT[col]=tops;colEdgeB[col]=bots;
+}
+
+var T=28000,t0=null;
 function ease(t){return t<.5?2*t*t:-1+(4-2*t)*t;}
 function lerp(a,b,t){return a+(b-a)*t;}
 function clamp(t){return Math.max(0,Math.min(1,t));}
@@ -70,154 +95,90 @@ function clamp(t){return Math.max(0,Math.min(1,t));}
 function frame(ts){
   if(!t0)t0=ts;
   var raw=((ts-t0)%T)/T;
-  ctx.fillStyle='#080808'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#080808';ctx.fillRect(0,0,W,H);
 
-  // 0-10%: smooth letter
-  // 10-14%: cut lines appear
-  // 14-28%: fragments separate (clipped letter pieces with curved edges)
-  // 26-44%: curved edges straighten into rectangles (the KEY animation)
-  // 42-62%: bars morph to 3D
+  // 0-14%:  letter A (drawn as polygon, smooth)
+  // 12-28%: cut lines appear + gaps widen (polygon still, black gaps drawn over)
+  // 26-42%: edges morph from curved to straight (polygon points interpolate)
+  // 40-62%: bars morph to 3D heights
   // 60-90%: hold
   // 90-100%: fade
 
-  var tCuts      = ease(clamp((raw-.10)/.04));
-  var tSplit     = ease(clamp((raw-.14)/.14));
-  var tStraighten= ease(clamp((raw-.26)/.18)); // curved letter edges → straight rect edges
-  var tMorph     = ease(clamp((raw-.42)/.20));
-  var tFade      = 1-ease(clamp((raw-.90)/.08));
-
-  var letterW=540, letterL=W/2-letterW/2, stripW=letterW/NUM;
-  var barW=30, gapMax=4;
-  var totBW=NUM*barW+(NUM-1)*gapMax, barsL=W/2-totBW/2;
+  var tCuts     = ease(clamp((raw-.12)/.04));
+  var tSplit    = ease(clamp((raw-.14)/.14));
+  var tStraight = ease(clamp((raw-.26)/.16));
+  var tMorph    = ease(clamp((raw-.40)/.22));
+  var tFade     = 1-ease(clamp((raw-.90)/.08));
 
   ctx.globalAlpha=tFade;
 
-  // PHASE 1+2: Draw full letter, then cut black gaps over it to "slice" it.
-  // The letter stays visible throughout — gaps widen to physically cut it.
-  // Once gaps are wide enough (tSplit>.8), switch to clip-path fragments.
+  var stripW_orig=LW/NUM;
 
-  // Crossfade zone: 0.5-0.9 of tSplit — both methods overlap
-  var letterAlpha = 1 - ease(clamp((tSplit - 0.4) / 0.5)); // letter fades 0.4-0.9
-  var fragAlpha = ease(clamp((tSplit - 0.3) / 0.5));        // fragments appear 0.3-0.8
+  // Draw 16 columns — each as a polygon that morphs from letter-shape to rectangle
+  for(var col=0;col<NUM;col++){
+    // Position
+    var origCX = LX+(col+.5)*stripW_orig;
+    var splitGap = gapMax*tSplit;
+    var splitTot = NUM*stripW_orig+(NUM-1)*splitGap;
+    var splitL = W/2-splitTot/2;
+    var splitCX = splitL+col*(stripW_orig+splitGap)+stripW_orig/2;
+    var barCX = barsLX+col*(barW+gapMax)+barW/2;
+    var cx = lerp(lerp(origCX,splitCX,tSplit),barCX,tStraight);
+    var w = lerp(stripW_orig,barW,tStraight);
+    var x0 = cx-w/2;
 
-  // Layer 1: Smooth letter with black gap cuts
-  if (letterAlpha > 0.01) {
-    ctx.save();
-    ctx.globalAlpha = tFade * letterAlpha;
-    ctx.fillStyle='#33ff33';
-    ctx.font='bold 400px Arial,sans-serif';
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText('A',W/2,H/2-10);
+    // Height targets
+    var rectTop=lerp(colTops[col],H*.08,tStraight);
+    var rectBot=lerp(colBots[col],H*.92,tStraight);
+    var finTop=lerp(rectTop,tgtT[col]*H,tMorph);
+    var finBot=lerp(rectBot,tgtB[col]*H,tMorph);
 
-    // Black gap lines cutting through the letter
-    if (tCuts > 0.01) {
-      ctx.globalAlpha = tFade;
-      for (var col=0; col<NUM; col++) {
-        var gapWidth = tSplit * gapMax * 2;
-        var lineX = letterL + col * stripW;
-        if (gapWidth > 0.3) {
-          ctx.fillStyle='#080808';
-          ctx.fillRect(lineX - gapWidth/2, 0, gapWidth, H);
-        }
-      }
+    // Build morphing polygon path
+    var edges=colEdgeT[col], edgesB=colEdgeB[col];
+    var npx=edges.length;
+    var scaleX=w/npx;
+
+    ctx.beginPath();
+    // Top edge
+    for(var px=0;px<npx;px++){
+      var edgeY=lerp(edges[px],finTop,tStraight);
+      var sx=x0+px*scaleX;
+      px===0?ctx.moveTo(sx,edgeY):ctx.lineTo(sx,edgeY);
     }
-    ctx.restore();
+    // Right side
+    ctx.lineTo(x0+w,lerp(edgesB[npx-1],finBot,tStraight));
+    // Bottom edge (right to left)
+    for(var px=npx-1;px>=0;px--){
+      ctx.lineTo(x0+px*scaleX,lerp(edgesB[px],finBot,tStraight));
+    }
+    ctx.closePath();
 
-    // Cut lines
-    if (tCuts > 0.01 && tSplit < 0.4) {
-      for (var col=0; col<NUM; col++) {
-        ctx.save();
-        ctx.globalAlpha = 0.7 * (1-tSplit*2.5) * tFade;
-        ctx.strokeStyle='#88ff88'; ctx.lineWidth=1.5;
-        ctx.beginPath();
-        ctx.moveTo(letterL+col*stripW, 20);
-        ctx.lineTo(letterL+col*stripW, H-20);
-        ctx.stroke();
-        ctx.restore();
-      }
+    // Fill
+    var bright=Math.floor(lerp(150,40+190*((finBot-finTop)/H),tMorph));
+    bright=Math.max(30,Math.min(230,bright));
+    ctx.fillStyle='rgb(0,'+bright+',0)';
+    ctx.fill();
+
+    // Outlines when separated
+    if(tSplit>.1){
+      ctx.strokeStyle='rgba(0,180,0,'+(0.1+.2*tStraight)+')';
+      ctx.lineWidth=1;
+      ctx.strokeRect(x0+.5,finTop+.5,w-1,(finBot-finTop)-1);
     }
   }
 
-  // Layer 2: Clip-path fragments (fade in over letter)
-  if (fragAlpha > 0.01) {
-    ctx.save();
-    ctx.globalAlpha = tFade * fragAlpha;
+  // Cut lines (over everything, during early split)
+  if(tCuts>.01&&tSplit<.4){
     for(var col=0;col<NUM;col++){
-      var ce=colEdges[col];
-
-      // Position: during split, fragments stay at letter position but gaps appear
-      // During straighten, they move to final bar positions
-      var lCX=letterL+(col+.5)*stripW;
-      // Split position: same center as letter but with gaps inserted
-      var splitGap = gapMax * tSplit;
-      var splitTotalW = NUM * stripW + (NUM-1) * splitGap;
-      var splitL = W/2 - splitTotalW/2;
-      var splitCX = splitL + col * (stripW + splitGap) + stripW/2;
-      // Final bar position
-      var bCX=barsL+col*(barW+gapMax)+barW/2;
-      // During split: letter→split (gaps only). During straighten: split→bar (width narrows)
-      var cx=lerp(lerp(lCX,splitCX,tSplit), bCX, tStraighten);
-      // Width: full strip width during split, narrows during straighten
-      var w=lerp(stripW,barW,tStraighten);
-      var x0=cx-w/2;
-
-      // For each pixel column within the strip, compute the edge
-      // Interpolate from curved letter edge → straight rect edge
-      var rectTop=lerp(ce.minTop, H*.08, tStraighten*tMorph<.01?tStraighten:1);
-      var rectBot=lerp(ce.maxBot, H*.92, tStraighten*tMorph<.01?tStraighten:1);
-
-      // 3D morph of uniform rect
-      var finTop=lerp(rectTop, tgtT[col]*H, tMorph);
-      var finBot=lerp(rectBot, tgtB[col]*H, tMorph);
-
-      // Draw using shaped clip path that morphs from letter shape to rectangle
       ctx.save();
-
+      ctx.globalAlpha=.6*(1-tSplit*2.5)*tFade;
+      ctx.strokeStyle='#88ff88';ctx.lineWidth=1.5;
       ctx.beginPath();
-      // Top edge: go left to right
-      var pixelsInStrip=ce.sw;
-      var scaleX=w/pixelsInStrip;
-
-      for(var px=0;px<pixelsInStrip;px++){
-        // Letter top edge at this pixel
-        var letterTop=ce.tops[px];
-        // Straightened top: interpolate toward flat line
-        var edgeTop=lerp(letterTop, finTop, tStraighten);
-        var screenX=x0+px*scaleX;
-        if(px===0) ctx.moveTo(screenX, edgeTop);
-        else ctx.lineTo(screenX, edgeTop);
-      }
-      // Right side down
-      var lastBot=lerp(ce.bots[pixelsInStrip-1], finBot, tStraighten);
-      ctx.lineTo(x0+w, lastBot);
-      // Bottom edge: right to left
-      for(var px=pixelsInStrip-1;px>=0;px--){
-        var letterBot=ce.bots[px];
-        var edgeBot=lerp(letterBot, finBot, tStraighten);
-        ctx.lineTo(x0+px*scaleX, edgeBot);
-      }
-      ctx.closePath();
-      ctx.clip();
-
-      // ONE SOLID FILL — no fade, no crossfade, no transparency tricks
-      // Color shifts from bright green (letter) to distance-shaded (3D) during morph
-      var bright=Math.floor(lerp(150, 40+190*((finBot-finTop)/H), tMorph));
-      bright=Math.max(30,Math.min(230,bright));
-      ctx.fillStyle='rgb(0,'+bright+',0)';
-      ctx.fillRect(x0, Math.min(finTop, ce.minTop), w, Math.max(finBot,ce.maxBot)-Math.min(finTop,ce.minTop)+1);
-
-      ctx.restore(); // restore clip
-
-      // Edge outlines
-      if(tSplit>.1){
-        ctx.strokeStyle='rgba(0,180,0,'+(0.1+.2*tStraighten)+')';
-        ctx.lineWidth=1;
-        ctx.strokeRect(x0+.5,finTop+.5,w-1,(finBot-finTop)-1);
-      }
-
-      // (cut lines are drawn in Layer 1)
+      ctx.moveTo(LX+col*stripW_orig,20);
+      ctx.lineTo(LX+col*stripW_orig,H-20);
+      ctx.stroke();
+      ctx.restore();
     }
-    ctx.restore(); // end Layer 2 alpha
   }
 
   // Labels
@@ -225,16 +186,16 @@ function frame(ts){
   ctx.textAlign='center';
   ctx.font='14px Consolas,Courier New,monospace';
   var label='';
-  if(raw<.12) label='Standard font glyph — "A"';
-  else if(raw<.16) label='Cutting into 16 vertical fragments';
-  else if(raw<.28) label='Fragments of the letter separate';
-  else if(raw<.44) label='Curved edges straighten into rectangles';
+  if(raw<.14) label='Standard font glyph — "A"';
+  else if(raw<.20) label='Cutting into 16 vertical fragments';
+  else if(raw<.30) label='Fragments of the letter separate';
+  else if(raw<.42) label='Curved edges straighten into rectangles';
   else if(raw<.62) label='Hinting VM raycasts → SCFS sets bar heights';
   else if(raw<.90) label='3D rendered by TrueType font hinting bytecode';
   if(label){ctx.fillStyle='#888';ctx.fillText(label,W/2,22);}
 
-  if(raw>.36&&raw<.90){
-    ctx.save();ctx.globalAlpha=clamp((raw-.36)/.06)*clamp((.90-raw)/.04)*.5;
+  if(raw>.34&&raw<.90){
+    ctx.save();ctx.globalAlpha=clamp((raw-.34)/.06)*clamp((.90-raw)/.04)*.5;
     ctx.fillStyle='#555';ctx.font='11px Consolas,monospace';
     ctx.fillText("font-variation-settings: 'MOVX' -62, 'TURN' "+lerp(-1000,0,tMorph).toFixed(0),W/2,H-14);
     ctx.restore();
@@ -248,7 +209,6 @@ function frame(ts){
   ctx.globalAlpha=1;
   requestAnimationFrame(frame);
 }
-document.fonts.ready.then(function(){init();requestAnimationFrame(frame);});
+requestAnimationFrame(frame);
 </script>
-</body>
-</html>
+</body></html>
