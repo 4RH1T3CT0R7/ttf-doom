@@ -92,10 +92,14 @@ function frame(ts){
 
   ctx.globalAlpha=tFade;
 
-  // ALWAYS draw via per-column clip paths — when tSplit=0 and tStraighten=0,
-  // the clips perfectly match the letter outline so it looks like a solid letter.
-  // This ensures smooth transition with no sudden jump.
-  {
+  // Phase 1: full letter (no cuts yet)
+  if(tCuts<.01){
+    ctx.fillStyle='#33ff33';
+    ctx.font='bold 400px Arial,sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('A',W/2,H/2-10);
+  } else {
+    // Per-column rendering
     for(var col=0;col<NUM;col++){
       var ce=colEdges[col];
 
