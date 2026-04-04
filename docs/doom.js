@@ -40,6 +40,23 @@
     // Debug overlay (toggled with Tab key)
     var debugMode = false;
 
+    // --- Sprite preloading ---
+    var sprites = {};
+    function preloadSprites() {
+        var files = {
+            enemy1: 'sprites/enemy1.png',
+            enemy2: 'sprites/enemy2.png',
+            enemy1_dead: 'sprites/enemy1_dead.png',
+            enemy2_dead: 'sprites/enemy2_dead.png',
+            pistol: 'sprites/pistol.png'
+        };
+        for (var key in files) {
+            sprites[key] = new Image();
+            sprites[key].src = files[key];
+        }
+    }
+    preloadSprites();
+
     // --- Enemies ---
     var ENEMY_SPEED = 30;        // world units per second
     var ENEMY_ATTACK_RANGE = 25; // within this distance enemies deal damage
@@ -379,49 +396,37 @@
             var size = Math.min(200, 3000 / dist);
             var screenY = h * 0.5; // vertically centered
 
-            // Body color -- flash white when hurt
-            var bodyColor;
-            if (e.hurtTimer > 0) {
-                bodyColor = "#fff";
+            // Draw sprite image
+            var spriteKey = e.type === 1 ? 'enemy1' : 'enemy2';
+            var img = sprites[spriteKey];
+            if (img && img.complete && img.naturalWidth > 0) {
+                var spriteH = size * 2;
+                var spriteW = spriteH * (img.width / img.height);
+
+                // Pixelated scaling for retro look
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(img, screenX - spriteW / 2, screenY - spriteH / 2, spriteW, spriteH);
+                ctx.imageSmoothingEnabled = true;
+
+                // Hurt flash: semi-transparent white overlay
+                if (e.hurtTimer > 0) {
+                    ctx.globalAlpha = 0.5;
+                    ctx.fillStyle = "#fff";
+                    ctx.fillRect(screenX - spriteW / 2, screenY - spriteH / 2, spriteW, spriteH);
+                    ctx.globalAlpha = 1.0;
+                }
             } else {
-                bodyColor = e.type === 1 ? "#c00" : "#d60";
+                // Fallback: colored rectangle if sprite not loaded yet
+                ctx.fillStyle = e.type === 1 ? "#c00" : "#d60";
+                ctx.fillRect(screenX - size * 0.5, screenY - size, size, size * 2);
             }
-
-            // Shadow / outline for visibility against green walls
-            ctx.fillStyle = "rgba(0,0,0,0.4)";
-            ctx.fillRect(screenX - size * 0.5 - 2, screenY - size - 2, size + 4, size * 2 + 4);
-
-            // Body
-            ctx.fillStyle = bodyColor;
-            ctx.fillRect(screenX - size * 0.5, screenY - size, size, size * 2);
-
-            // Horns (type 2 is tougher, has horns)
-            if (e.type === 2) {
-                ctx.fillStyle = e.hurtTimer > 0 ? "#fff" : "#a40";
-                var hornW = size * 0.15;
-                var hornH = size * 0.5;
-                ctx.fillRect(screenX - size * 0.4, screenY - size - hornH, hornW, hornH);
-                ctx.fillRect(screenX + size * 0.25, screenY - size - hornH, hornW, hornH);
-            }
-
-            // Eyes
-            ctx.fillStyle = "#ff0";
-            var eyeSize = Math.max(2, size * 0.15);
-            ctx.fillRect(screenX - size * 0.2, screenY - size * 0.5, eyeSize, eyeSize);
-            ctx.fillRect(screenX + size * 0.1, screenY - size * 0.5, eyeSize, eyeSize);
-
-            // Mouth
-            ctx.fillStyle = "#000";
-            var mouthW = size * 0.3;
-            var mouthH = Math.max(1, size * 0.08);
-            ctx.fillRect(screenX - mouthW * 0.5, screenY - size * 0.1, mouthW, mouthH);
 
             // Health bar above enemy
             if (e.hp < (e.type === 2 ? 150 : 100)) {
                 var barW = size * 0.8;
                 var barH = Math.max(2, size * 0.08);
                 var barX = screenX - barW * 0.5;
-                var barY = screenY - size - (e.type === 2 ? size * 0.5 + 6 : 6);
+                var barY = screenY - size - 6;
                 var maxHp = e.type === 2 ? 150 : 100;
                 var hpFrac = Math.max(0, e.hp / maxHp);
 
@@ -435,58 +440,45 @@
 
     /** Render the weapon at the bottom center of the overlay */
     function renderWeapon(ctx, w, h) {
-        var gunW = w * 0.12;
-        var gunH = h * 0.22;
-        var gunX = w * 0.5 - gunW * 0.5;
-        var gunY = h - gunH;
+        var img = sprites.pistol;
+        if (img && img.complete && img.naturalWidth > 0) {
+            var scale = 6; // pistol sprite is tiny (~44x16), scale up
+            var imgW = img.width * scale;
+            var imgH = img.height * scale;
+            var x = w / 2 - imgW / 2;
+            var y = h - imgH - 10;
 
-        // Weapon bob when muzzle flash active (recoil)
-        var recoilY = 0;
-        if (muzzleFlashTimer > 0) {
-            recoilY = -8 * (muzzleFlashTimer / 0.1);
-        }
+            // Recoil effect
+            if (muzzleFlashTimer > 0) {
+                y -= 15;
+            }
 
-        // Handle / grip
-        ctx.fillStyle = "#555";
-        ctx.fillRect(gunX + gunW * 0.3, gunY + gunH * 0.5 + recoilY, gunW * 0.4, gunH * 0.5);
+            // Pixelated scaling for retro look (no smoothing)
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(img, x, y, imgW, imgH);
+            ctx.imageSmoothingEnabled = true;
 
-        // Gun body
-        ctx.fillStyle = "#888";
-        ctx.fillRect(gunX, gunY + recoilY, gunW, gunH * 0.55);
-
-        // Barrel
-        ctx.fillStyle = "#666";
-        var barrelW = gunW * 0.28;
-        var barrelH = gunH * 0.3;
-        ctx.fillRect(gunX + gunW * 0.5 - barrelW * 0.5, gunY - barrelH + recoilY, barrelW, barrelH);
-
-        // Barrel tip highlight
-        ctx.fillStyle = "#444";
-        ctx.fillRect(gunX + gunW * 0.5 - barrelW * 0.5, gunY - barrelH + recoilY, barrelW, 3);
-
-        // Muzzle flash
-        if (muzzleFlashTimer > 0) {
-            var flashSize = gunW * 0.4;
-            var flashX = w * 0.5;
-            var flashY = gunY - barrelH + recoilY;
-
-            // Outer glow
-            ctx.fillStyle = "rgba(255, 200, 0, 0.6)";
-            ctx.beginPath();
-            ctx.arc(flashX, flashY, flashSize * 1.2, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Inner bright flash
-            ctx.fillStyle = "#fff";
-            ctx.beginPath();
-            ctx.arc(flashX, flashY, flashSize * 0.5, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Yellow core
-            ctx.fillStyle = "#ff0";
-            ctx.beginPath();
-            ctx.arc(flashX, flashY, flashSize * 0.8, 0, Math.PI * 2);
-            ctx.fill();
+            // Muzzle flash
+            if (muzzleFlashTimer > 0) {
+                ctx.fillStyle = "rgba(255,255,100,0.6)";
+                ctx.beginPath();
+                ctx.arc(w / 2, y - 10, imgW * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        } else {
+            // Fallback: draw rectangles if sprite not loaded
+            var gunW = w * 0.12;
+            var gunH = h * 0.22;
+            var gunX = w * 0.5 - gunW * 0.5;
+            var gunY = h - gunH;
+            var recoilY = 0;
+            if (muzzleFlashTimer > 0) {
+                recoilY = -8 * (muzzleFlashTimer / 0.1);
+            }
+            ctx.fillStyle = "#555";
+            ctx.fillRect(gunX + gunW * 0.3, gunY + gunH * 0.5 + recoilY, gunW * 0.4, gunH * 0.5);
+            ctx.fillStyle = "#888";
+            ctx.fillRect(gunX, gunY + recoilY, gunW, gunH * 0.55);
         }
     }
 
