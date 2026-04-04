@@ -34,7 +34,7 @@
     var score = 0;
     var muzzleFlashTimer = 0;
     var lastShotTime = 0;
-    var SHOT_COOLDOWN = 0.3; // seconds
+    var SHOT_COOLDOWN = 0.55; // seconds — realistic firing rate
     var dead = false;
 
     // Debug overlay (toggled with Tab key)
