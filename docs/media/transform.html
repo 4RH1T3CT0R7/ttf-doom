@@ -201,15 +201,15 @@ function frame(ts){
   if(label){ctx.fillStyle='#888';ctx.fillText(label,W/2,22);}
 
   if(raw>.36&&raw<.90){
-    ctx.save();ctx.globalAlpha=clamp((raw-.36)/.06)*clamp((.90-raw)/.04)*.5;
-    ctx.fillStyle='#555';ctx.font='11px Consolas,monospace';
+    ctx.save();ctx.globalAlpha=clamp((raw-.36)/.06)*clamp((.90-raw)/.04)*.85;
+    ctx.fillStyle='#999';ctx.font='12px Consolas,monospace';
     ctx.fillText("font-variation-settings: 'MOVX' -62, 'TURN' "+lerp(-1000,0,tMorph).toFixed(0),W/2,H-14);
     ctx.restore();
   }
   if(raw>.60&&raw<.90){
-    ctx.save();ctx.globalAlpha=clamp((raw-.60)/.04)*.4;
-    ctx.fillStyle='#444';ctx.font='10px Consolas,monospace';
-    ctx.fillText('doom.ttf  •  6,580 bytes  •  13 FDEF  •  795 storage',W/2,H-2);
+    ctx.save();ctx.globalAlpha=clamp((raw-.60)/.04)*.75;
+    ctx.fillStyle='#888';ctx.font='11px Consolas,monospace';
+    ctx.fillText('doom.ttf  •  6,580 bytes  •  13 FDEF  •  795 storage',W/2,H-4);
     ctx.restore();
   }
   ctx.globalAlpha=1;
