@@ -26,7 +26,7 @@ The entire rendering engine fits in 6,580 bytes.
 </p>
 
 <p align="center">
-  <em>Debug mode (press D): font variation axes, glyph contour inspector, ray visualization on minimap</em>
+  <em>Debug mode (press Tab): font variation axes, glyph contour inspector, ray visualization on minimap</em>
 </p>
 
 ---
@@ -55,7 +55,7 @@ browser JS (position/angle) → font-variation-settings → GETVARIATION
 
 The font is a pure renderer. JavaScript handles game state, movement, and collision. The canvas overlay adds enemies, weapon, and HUD on top of the font-rendered walls.
 
-Press **D** in the demo to see the debug overlay: live `font-variation-settings` axes, a glyph contour inspector showing all 16 bar heights, and ray lines on the minimap matching the hinting VM's raycasts.
+Press **Tab** in the demo to see the debug overlay: live `font-variation-settings` axes, a glyph contour inspector showing all 16 bar heights, and ray lines on the minimap matching the hinting VM's raycasts.
 
 <p align="center">
   <img src="docs/media/debug-mode.png" alt="Debug mode showing font axes and glyph inspector" width="640" />
