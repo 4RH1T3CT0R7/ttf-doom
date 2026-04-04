@@ -42,17 +42,23 @@
 
     // --- Sprite preloading ---
     var sprites = {};
+    var weaponFrames = []; // animated weapon frames
     function preloadSprites() {
         var files = {
             enemy1: 'sprites/enemy1.png',
             enemy2: 'sprites/enemy2.png',
             enemy1_dead: 'sprites/enemy1_dead.png',
-            enemy2_dead: 'sprites/enemy2_dead.png',
-            pistol: 'sprites/pistol.png'
+            enemy2_dead: 'sprites/enemy2_dead.png'
         };
         for (var key in files) {
             sprites[key] = new Image();
             sprites[key].src = files[key];
+        }
+        // Weapon animation frames (CC0 FPS sprites)
+        var wNames = ['weapon_idle', 'weapon_fire1', 'weapon_fire2', 'weapon_fire3', 'weapon_fire4'];
+        for (var i = 0; i < wNames.length; i++) {
+            weaponFrames[i] = new Image();
+            weaponFrames[i].src = 'sprites/' + wNames[i] + '.png';
         }
     }
     preloadSprites();
@@ -440,45 +446,31 @@
 
     /** Render the weapon at the bottom center of the overlay */
     function renderWeapon(ctx, w, h) {
-        var img = sprites.pistol;
+        // Pick animation frame: idle (0) or fire sequence (1-4)
+        var frameIdx = 0;
+        if (muzzleFlashTimer > 0) {
+            // Cycle through fire frames based on remaining timer
+            var fireProgress = 1 - (muzzleFlashTimer / 0.15);
+            frameIdx = 1 + Math.min(3, Math.floor(fireProgress * 4));
+        }
+        var img = weaponFrames[frameIdx];
         if (img && img.complete && img.naturalWidth > 0) {
-            var scale = 6; // pistol sprite is tiny (~44x16), scale up
+            // Scale to fill bottom portion of screen
+            var scale = h / img.height * 0.7;
             var imgW = img.width * scale;
             var imgH = img.height * scale;
             var x = w / 2 - imgW / 2;
-            var y = h - imgH - 10;
+            var y = h - imgH;
 
-            // Recoil effect
-            if (muzzleFlashTimer > 0) {
-                y -= 15;
-            }
-
-            // Pixelated scaling for retro look (no smoothing)
-            ctx.imageSmoothingEnabled = false;
             ctx.drawImage(img, x, y, imgW, imgH);
-            ctx.imageSmoothingEnabled = true;
-
-            // Muzzle flash
-            if (muzzleFlashTimer > 0) {
-                ctx.fillStyle = "rgba(255,255,100,0.6)";
-                ctx.beginPath();
-                ctx.arc(w / 2, y - 10, imgW * 0.3, 0, Math.PI * 2);
-                ctx.fill();
-            }
         } else {
-            // Fallback: draw rectangles if sprite not loaded
+            // Fallback rectangles
             var gunW = w * 0.12;
             var gunH = h * 0.22;
             var gunX = w * 0.5 - gunW * 0.5;
             var gunY = h - gunH;
-            var recoilY = 0;
-            if (muzzleFlashTimer > 0) {
-                recoilY = -8 * (muzzleFlashTimer / 0.1);
-            }
-            ctx.fillStyle = "#555";
-            ctx.fillRect(gunX + gunW * 0.3, gunY + gunH * 0.5 + recoilY, gunW * 0.4, gunH * 0.5);
             ctx.fillStyle = "#888";
-            ctx.fillRect(gunX, gunY + recoilY, gunW, gunH * 0.55);
+            ctx.fillRect(gunX, gunY, gunW, gunH * 0.55);
         }
     }
 
