@@ -446,32 +446,128 @@
 
     /** Render the weapon at the bottom center of the overlay */
     function renderWeapon(ctx, w, h) {
-        // Pick animation frame: idle (0) or fire sequence (1-4)
-        var frameIdx = 0;
-        if (muzzleFlashTimer > 0) {
-            // Cycle through fire frames based on remaining timer
-            var fireProgress = 1 - (muzzleFlashTimer / 0.15);
-            frameIdx = 1 + Math.min(3, Math.floor(fireProgress * 4));
-        }
-        var img = weaponFrames[frameIdx];
-        if (img && img.complete && img.naturalWidth > 0) {
-            // Scale to fill bottom portion of screen
-            var scale = h / img.height * 0.7;
-            var imgW = img.width * scale;
-            var imgH = img.height * scale;
-            var x = w / 2 - imgW / 2;
-            var y = h - imgH;
+        // Pixel-art DOOM-style pistol drawn on canvas
+        // Scale factor based on screen height
+        var S = Math.floor(h / 100); // pixel size
+        if (S < 2) S = 2;
+        var firing = muzzleFlashTimer > 0;
+        var recoil = firing ? Math.floor(S * 2 * (muzzleFlashTimer / 0.15)) : 0;
 
-            ctx.drawImage(img, x, y, imgW, imgH);
-        } else {
-            // Fallback rectangles
-            var gunW = w * 0.12;
-            var gunH = h * 0.22;
-            var gunX = w * 0.5 - gunW * 0.5;
-            var gunY = h - gunH;
-            ctx.fillStyle = "#888";
-            ctx.fillRect(gunX, gunY, gunW, gunH * 0.55);
+        // Anchor: bottom-center of screen
+        var bx = Math.floor(w / 2); // center x
+        var by = h - recoil;        // bottom y (shifts up on recoil)
+
+        ctx.imageSmoothingEnabled = false;
+
+        // Helper: draw a pixel block
+        function px(x, y, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(bx + x * S, by + y * S, S, S);
         }
+        function rect(x, y, rw, rh, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(bx + x * S, by + y * S, rw * S, rh * S);
+        }
+
+        // --- Hand (green/tan skin like DOOM marine) ---
+        var skin = '#b8956a';
+        var skinDk = '#8a6d4a';
+        var glove = '#4a6a2a'; // olive green glove
+        var gloveDk = '#3a5420';
+
+        // Forearm (bottom, coming from below-right)
+        rect(-8, -12, 16, 14, skin);    // main forearm block
+        rect(-9, -10, 1, 10, skinDk);   // left shadow
+        rect(8, -10, 1, 10, skinDk);    // right shadow
+        rect(-7, -6, 14, 8, skin);      // wider lower arm
+
+        // Glove / wrist
+        rect(-6, -14, 12, 4, glove);
+        rect(-5, -15, 10, 2, gloveDk);
+        rect(-7, -12, 1, 3, gloveDk);
+        rect(6, -12, 1, 3, gloveDk);
+
+        // Fingers gripping
+        rect(-3, -17, 2, 3, skin);   // thumb
+        rect(1, -17, 2, 3, skin);    // index finger area
+        rect(-1, -16, 2, 2, skinDk); // grip shadow
+
+        // --- Pistol body ---
+        var metal = '#666';
+        var metalLt = '#888';
+        var metalDk = '#444';
+        var grip = '#553';
+        var gripDk = '#332';
+
+        // Barrel (horizontal, pointing up-right from hand)
+        rect(-2, -24, 4, 8, metal);      // barrel
+        rect(-1, -26, 2, 3, metalDk);    // muzzle
+        rect(-3, -22, 1, 6, metalDk);    // barrel left shadow
+        rect(2, -22, 1, 6, metalLt);     // barrel right highlight
+
+        // Slide
+        rect(-4, -20, 8, 4, metalLt);    // slide body
+        rect(-4, -20, 8, 1, metalDk);    // slide top edge
+        rect(-4, -17, 1, 2, metalDk);    // slide shadow left
+        rect(4, -20, 1, 4, metal);       // slide right edge
+
+        // Trigger guard
+        rect(-3, -16, 6, 1, metal);
+        rect(-3, -16, 1, 3, metalDk);
+        rect(2, -16, 1, 3, metalDk);
+
+        // Trigger
+        rect(0, -15, 1, 2, '#a33');
+
+        // Grip (pistol handle)
+        rect(-3, -13, 6, 5, grip);
+        rect(-3, -13, 1, 5, gripDk);
+        rect(2, -13, 1, 5, gripDk);
+        rect(-2, -8, 4, 1, gripDk);     // grip bottom
+
+        // Grip texture lines
+        for (var i = 0; i < 3; i++) {
+            rect(-1, -12 + i * 2, 3, 1, gripDk);
+        }
+
+        // --- Muzzle flash (when firing) ---
+        if (firing) {
+            var flashSize = S * 4;
+            var fx = bx;
+            var fy = by - 27 * S;
+
+            // Outer glow
+            ctx.fillStyle = 'rgba(255,200,50,0.4)';
+            ctx.beginPath();
+            ctx.arc(fx, fy, flashSize * 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Core flash
+            ctx.fillStyle = 'rgba(255,255,100,0.7)';
+            ctx.beginPath();
+            ctx.arc(fx, fy, flashSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            // White center
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.beginPath();
+            ctx.arc(fx, fy, flashSize * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Flash spikes
+            ctx.strokeStyle = 'rgba(255,200,50,0.6)';
+            ctx.lineWidth = S;
+            for (var a = 0; a < 5; a++) {
+                var ang = a * Math.PI * 2 / 5 - Math.PI / 2;
+                var len = flashSize * (1.5 + Math.random() * 0.5);
+                ctx.beginPath();
+                ctx.moveTo(fx, fy);
+                ctx.lineTo(fx + Math.cos(ang) * len, fy + Math.sin(ang) * len);
+                ctx.stroke();
+            }
+        }
+
+        ctx.imageSmoothingEnabled = true;
     }
 
     /** Render the in-game HUD (health, ammo, score) */
