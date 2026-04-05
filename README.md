@@ -1,8 +1,10 @@
 # TTF-DOOM
 
-**A 3D raycasting engine running inside a TrueType font's hinting virtual machine.**
+A DOOM-style raycaster that runs inside a TrueType font's hinting program.
 
-Yes, the font file is the game engine. No, we are not sorry.
+<p align="center">
+  <img src="docs/media/demo.gif" width="640" />
+</p>
 
 <p align="center">
   <a href="https://4rh1t3ct0r7.github.io/ttf-doom/">
@@ -10,134 +12,84 @@ Yes, the font file is the game engine. No, we are not sorry.
   </a>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/font_size-6.5_KB-2563eb?style=flat-square" />
-  <img src="https://img.shields.io/badge/rendering-TrueType_bytecode-f97316?style=flat-square" />
-  <img src="https://img.shields.io/badge/tests-451_passing-22c55e?style=flat-square" />
-  <img src="https://img.shields.io/badge/license-Apache_2.0-6366f1?style=flat-square" />
-</p>
+## What is this?
 
-The first project to use the TrueType hinting instruction set for 3D rendering. Previous font-based computation projects (such as [llama.ttf](https://github.com/fuglede/llama.ttf)) rely on HarfBuzz WebAssembly shaping — a completely different mechanism. TTF-DOOM runs directly in the hinting bytecode interpreter (FDEF, CALL, RS, WS, SCFS) that ships with every TrueType renderer on every operating system.
+TrueType fonts have a built-in virtual machine for grid-fitting glyphs. It's got a stack, storage slots, arithmetic, conditionals, function calls - and it turns out it's Turing-complete. I wanted to see if I could get it to render 3D graphics.
 
-The entire rendering engine fits in 6,580 bytes.
+The font file contains a DDA raycasting engine written in TrueType bytecode. The glyph "A" has 16 vertical bar contours, and the hinting program raycasts against a 16x16 tile map and repositions those bars using SCFS instructions to form a 3D perspective view. The whole thing is 6.5 KB.
 
-<p align="center">
-  <img src="docs/media/demo.gif" alt="TTF-DOOM gameplay with debug overlay" width="640" />
-</p>
-
-<p align="center">
-  <em>Debug mode (press Tab): font variation axes, glyph contour inspector, ray visualization on minimap</em>
-</p>
-
----
-
-## From glyph to 3D
-
-<p align="center">
-  <img src="docs/media/transform.gif" alt="Standard A glyph transforms into 3D raycaster view" width="640" />
-</p>
-
-A normal "A" glyph becomes 16 vertical bar contours. The hinting VM reads player position from `font-variation-settings`, raycasts against the map, and repositions bar heights via SCFS. The result: a 3D perspective view rendered entirely by the font engine.
+JS handles movement, enemies, and shooting, then passes coordinates to the font through `font-variation-settings`. The font does the raycasting and wall rendering. Canvas overlay draws enemies, weapon, and HUD on top.
 
 ## How it works
 
-A custom DSL compiles to TrueType hinting bytecode. The bytecode is injected into a `.ttf` font containing 16 vertical bar contours. JavaScript passes player position and angle through `font-variation-settings`, the font's hinting VM raycasts against a 16x16 map, and SCFS instructions reposition the bars to form a 3D perspective view.
+I wrote a small compiler that takes a custom DSL and outputs TrueType hinting assembly. The DSL looks like a stripped-down C:
 
 ```
-game.doom (DSL) → compiler → doom.ttf (TT bytecode)
-                                  ↓
-browser JS (position/angle) → font-variation-settings → GETVARIATION
-                                  ↓
-                         hinting VM raycasts → SCFS moves points
-                                  ↓
-                         glyph renders as 3D view
+func raycast(col: int) -> int:
+    var ra: int = player_angle + col * 3 - FOV_HALF
+    var dx: int = get_cos(ra)
+    var dy: int = get_sin(ra)
+    ...
 ```
 
-The font is a pure renderer. JavaScript handles game state, movement, and collision. The canvas overlay adds enemies, weapon, and HUD on top of the font-rendered walls.
+This compiles to TT bytecode - `FDEF`, `CALL`, `RS`, `WS`, `SCFS`, etc. - and gets injected into a `.ttf` file along with sin/cos lookup tables and the map data. The compiler handles variable allocation (everything goes into TT storage slots), function definitions (FDEF/ENDF), and a few other things like fixed-point math.
 
-Press **Tab** in the demo to see the debug overlay: live `font-variation-settings` axes, a glyph contour inspector showing all 16 bar heights, and ray lines on the minimap matching the hinting VM's raycasts.
+The pipeline: `doom.doom` -> lexer -> parser -> codegen -> `doom.ttf`
 
 <p align="center">
-  <img src="docs/media/debug-mode.png" alt="Debug mode showing font axes and glyph inspector" width="640" />
+  <img src="docs/media/transform.gif" width="640" />
 </p>
 
-## What runs inside the font
+## TrueType arithmetic is insane
 
-- DDA ray marching (16 columns, 14 max steps)
-- Sin/cos lookup tables (256 entries)
-- Wall distance calculation and height mapping
-- F26Dot6 coordinate conversion via MPPEM
-- 13 FDEF functions, 795 storage slots
+`MUL` does `(a*b)/64`. Not `a*b`. Everything is F26Dot6 fixed-point internally. So `1 * 4 = 0`. I lost probably two days to this before I found a workaround: `DIV(a, 1)` returns `a * 64` (DIV is equally broken), then `MUL(a*64, b)` = `(a*64*b)/64` = `a*b`.
 
-## Comparison
+There's no WHILE instruction either. Loops compile to recursive FDEFs, and FreeType caps the call stack at ~64 frames. 16 columns x 14 ray steps barely fits.
 
-| Project | Environment | Rendering |
-|---------|------------|-----------|
-| doompdf | PDF JavaScript | Compiled C via asm.js |
-| DOOMQL | SQL database | SQL views |
-| DOOM Excel | Spreadsheet formulas | Cell coloring |
-| TS Types DOOM | TypeScript compiler | Type-level WebAssembly |
-| **TTF-DOOM** | **Font hinting VM** | **TrueType bytecode** |
+`return` inside a recursive-while doesn't exit. It pushes a value and keeps going. Everything had to be rewritten with hit flags.
 
-TTF-DOOM is the first project to use TrueType font hinting for 3D rendering. Previous font-based computation (llama.ttf) used HarfBuzz WebAssembly shaping, not the hinting instruction set.
+SCFS takes F26Dot6 pixel coordinates, not font units - took me a while to figure out why every bar was a tiny speck. Chrome caches hinted glyphs and sometimes skips re-hinting when axes change - fixed with per-frame jitter. `SVTCA[0]` selects Y, `[1]` selects X.
 
-## Quick start
+## Architecture
 
-```bash
+The font just renders walls. JS does everything else.
+
+Player position and angle go into three font variation axes (`MOVX`, `MOVY`, `TURN`). JS stuffs coordinates into `font-variation-settings` every frame. Browser re-hints the glyph. Shape changes.
+
+Press Tab in the demo to see what's going on under the hood:
+
+<p align="center">
+  <img src="docs/media/debug-mode.png" width="640" />
+</p>
+
+## Try it
+
+```
 git clone https://github.com/4RH1T3CT0R7/ttf-doom.git
 cd ttf-doom
 pip install fonttools freetype-py pygame pytest
 python game/build.py
 python -m http.server 8765
-# Open http://localhost:8765/hosts/browser/index.html in Chrome/Edge
 ```
 
-## Controls
+Open `http://localhost:8765/hosts/browser/index.html` in Chrome or Edge. WASD to move, arrows to turn, Space to shoot. Press Tab for a debug overlay showing the font variation axes in real-time.
 
-| Key | Action |
-|-----|--------|
-| W/S or arrows | Move forward/backward |
-| A/D | Strafe |
-| Left/Right arrows | Turn |
-| Space | Shoot |
-| R | Restart |
-
-## Project structure
+## Project layout
 
 ```
-compiler/       DSL lexer, parser, code generator → TrueType assembly
-fontgen/        Font builder, glyph generator, sin/cos tables
-game/           Raycaster source (doom.doom) and build script
-hosts/browser/  Browser demo with canvas overlay
-hosts/python/   Python/pygame development host
+compiler/       DSL -> TrueType assembly (lexer, parser, codegen)
+fontgen/        font builder, glyph generator, sin/cos tables
+game/           raycaster source (doom.doom) and build script
+hosts/browser/  browser demo
+hosts/python/   pygame host (for development)
 tests/          451 tests
-doom.ttf        The playable font (6,580 bytes)
+doom.ttf        the playable font (6,580 bytes)
 ```
 
-## Technical challenges
+## llama.ttf vs this
 
-**TrueType MUL truncation** — `MUL(1, 4) = 0` because TT MUL does `(a*b)/64`. Fixed with `DIV(a, 1)` pre-scaling to get correct integer multiply.
-
-**No loops** — While loops compile to recursive FDEF calls. FreeType limits call depth to ~64, constraining column count and ray steps.
-
-**No early return** — `return` inside a recursive while doesn't exit the function. Replaced with hit-flag pattern.
-
-**Browser caching** — Chrome caches hinted glyphs and skips re-hinting on axis changes. Solved with per-frame axis jitter.
-
-**Coordinate mismatch** — SCFS expects F26Dot6 pixel coordinates, not font units. Auto-conversion via MPPEM at runtime.
-
-## Specs
-
-| | |
-|-|-|
-| Font size | 6,580 bytes |
-| Functions | 13 FDEF |
-| Storage | 795 slots |
-| Columns | 16 |
-| Ray steps | 14 max |
-| FOV | 67 degrees |
-| Map | 16x16 tiles |
+[llama.ttf](https://github.com/fuglede/llama.ttf) also runs computation in a font, but it uses HarfBuzz's WASM shaper - basically a WebAssembly runtime bolted onto font shaping. TTF-DOOM uses the actual TrueType hinting bytecode that Apple shipped in 1991 for grid-fitting glyphs. Different VM entirely.
 
 ## License
 
-[Apache License 2.0](LICENSE)
+[Apache 2.0](LICENSE)
